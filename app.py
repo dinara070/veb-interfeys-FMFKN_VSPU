@@ -347,7 +347,7 @@ def main_panel():
 
     st.divider()
     st.subheader("📢 Оголошення та Новини")
-    # Додавати новини можуть TEACHER_LEVEL (Вчитель, Методист, Декан, Адмін)
+    # Додавати новини можуть TEACHER_LEVEL (Декан, Адмін)
     if st.session_state['role'] in TEACHER_LEVEL:
         with st.expander("📝 Додати нове оголошення"):
             with st.form("news_form"):
@@ -382,7 +382,7 @@ def students_groups_view():
     st.download_button("⬇️ Експортувати (CSV)", csv, "students.csv", "text/csv")
     st.dataframe(df, use_container_width=True)
     
-    # Редагування: ТІЛЬКИ ДЕКАНАТ (DEAN_LEVEL) - Вчитель тут тільки читає
+    # Редагування: ТІЛЬКИ ДЕКАНАТ (DEAN_LEVEL)
     if st.session_state['role'] in DEAN_LEVEL:
         st.divider()
         st.subheader("🛠️ Управління")
@@ -435,7 +435,7 @@ def schedule_view():
         st.table(df)
     else: st.info("Наразі дані не завантажені.")
     
-    # Редагування розкладу: ТІЛЬКИ ДЕКАНАТ (DEAN_LEVEL) - Вчитель тільки читає
+    # Редагування розкладу: ТІЛЬКИ ДЕКАНАТ (DEAN_LEVEL)
     if st.session_state['role'] in DEAN_LEVEL:
         st.divider()
         with st.form("sch"):
