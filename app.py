@@ -440,7 +440,7 @@ def schedule_view():
         st.divider()
         with st.form("sch"):
             d = st.selectbox("День", ["Понеділок", "Вівторок", "Середа", "Четвер", "П'ятниця"])
-            t = st.selectbox("Час", ["08:30", "10:10", "11:50", "13:30"])
+            t = st.selectbox("Час", ["08:30", "10:05", "11:40", "13:30", "15:00", "16:35"])
             s = st.text_input("Предмет")
             tch = st.text_input("Викладач", value=st.session_state['full_name'])
             if st.form_submit_button("Додати"):
