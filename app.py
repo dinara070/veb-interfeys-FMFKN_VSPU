@@ -450,7 +450,7 @@ def teachers_view():
 
     st.divider()
 
-    # --- 2. СПИСОК КАФЕДР ТА ВИКЛАДАЧІВ (З функціями Admin) ---
+    # --- 2. СПИСОК КАФЕДР ТА ВИКЛАДАЧІВ ---
     for dept, teachers in st.session_state.teachers_data.items():
         # Expander як на фото 319
         with st.expander(f"📚 {dept}", expanded=True):
