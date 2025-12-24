@@ -244,7 +244,6 @@ def login_register_page():
     conn = create_connection()
     c = conn.cursor()
 
-    # Список дозволених ролей для реєстрації та входу
     ALLOWED_STAFF = ["admin", "dean"]
 
     if action == "Вхід":
@@ -254,7 +253,6 @@ def login_register_page():
             c.execute('SELECT * FROM users WHERE username=? AND password=?', (username, make_hashes(password)))
             user = c.fetchone()
             if user:
-                # Перевірка: вхід дозволено ТІЛЬКИ для admin та dean
                 if user[2] not in ALLOWED_STAFF:
                     st.error("Доступ обмежено. Тільки для Адміністратора або Декана.")
                 else:
@@ -274,7 +272,6 @@ def login_register_page():
         new_user = st.text_input("Вигадайте логін")
         new_pass = st.text_input("Вигадайте пароль", type='password')
         
-        # Обмежений вибір ролей
         role = st.selectbox("Ваша посада", ALLOWED_STAFF)
         
         full_name = st.text_input("Ваше ПІБ (повністю)")
@@ -347,7 +344,6 @@ def main_panel():
 
     st.divider()
     st.subheader("📢 Оголошення та Новини")
-    # Додавати новини можуть TEACHER_LEVEL (Декан, Адмін)
     if st.session_state['role'] in TEACHER_LEVEL:
         with st.expander("📝 Додати нове оголошення"):
             with st.form("news_form"):
@@ -382,7 +378,6 @@ def students_groups_view():
     st.download_button("⬇️ Експортувати (CSV)", csv, "students.csv", "text/csv")
     st.dataframe(df, use_container_width=True)
     
-    # Редагування: ТІЛЬКИ ДЕКАНАТ (DEAN_LEVEL)
     if st.session_state['role'] in DEAN_LEVEL:
         st.divider()
         st.subheader("🛠️ Управління")
@@ -422,7 +417,6 @@ def students_groups_view():
 import streamlit as st
 
 # --- ДАНІ (Викладачі) ---
-# Використовуємо session_state для збереження змін під час сесії
 if 'teachers_data' not in st.session_state:
     st.session_state.teachers_data = {
         "Кафедра алгебри і методики навчання математики": [
@@ -453,7 +447,7 @@ if 'teachers_data' not in st.session_state:
 def teachers_view():
     st.title("👨‍🏫 Викладачі")
 
-    # --- 1. РОЗДІЛ "УПРАВЛІННЯ" (Відтворення фото 322) ---
+    # --- 1. РОЗДІЛ "УПРАВЛІННЯ" ---
     st.markdown("### 🛠️ Управління")
     
     # Створення вкладок як на скриншоті
@@ -462,7 +456,6 @@ def teachers_view():
     with tab_add:
         with st.container(border=True): # Створює білу картку як на фото
             new_pib = st.text_input("ПІБ", placeholder="Прізвище Ім'я По батькові")
-            # На фото вибір групи, тут - вибір кафедри для викладача
             target_dept = st.selectbox("Кафедра", list(st.session_state.teachers_data.keys()))
             if st.button("Додати", type="secondary"):
                 if new_pib:
@@ -483,27 +476,22 @@ def teachers_view():
 
     # --- 2. СПИСОК КАФЕДР ТА ВИКЛАДАЧІВ (З функціями Admin) ---
     for dept, teachers in st.session_state.teachers_data.items():
-        # Expander як на фото 319
         with st.expander(f"📚 {dept}", expanded=True):
             
-            # Кнопка швидкого додавання в середині кафедри
             if st.button(f"➕ Додати співробітника до: {dept[:20]}...", key=f"fast_add_{dept}"):
                 st.info("Будь ласка, скористайтеся формою 'Управління' вгорі сторінки.")
 
             for i, t in enumerate(teachers):
-                # Створюємо колонки для тексту та кнопок дій
                 col_text, col_edit, col_del = st.columns([0.8, 0.05, 0.05])
                 
                 with col_text:
                     st.write(f"- {t}")
                 
                 with col_edit:
-                    # Іконка олівця для редагування
                     if st.button("✏️", key=f"edit_{dept}_{i}"):
                         st.toast(f"Режим редагування для: {t}")
                 
                 with col_del:
-                    # Іконка кошика для видалення
                     if st.button("🗑️", key=f"del_{dept}_{i}"):
                         st.session_state.teachers_data[dept].pop(i)
                         st.rerun()
@@ -518,7 +506,6 @@ def schedule_view():
         st.table(df)
     else: st.info("Наразі дані не завантажені.")
     
-    # Редагування розкладу: ТІЛЬКИ ДЕКАНАТ (DEAN_LEVEL)
     if st.session_state['role'] in DEAN_LEVEL:
         st.divider()
         with st.form("sch"):
@@ -535,7 +522,6 @@ def documents_view():
     st.title("📂 Документообіг та Заяви")
     conn = create_connection()
     
-    # Визначаємо доступні вкладки залежно від ролі (Для деканату додається "Обробка")
     tabs_list = ["📂 Реєстр / Мої заяви", "➕ Створити заяву", "📄 Шаблони заяв"]
     if st.session_state['role'] in DEAN_LEVEL:
         tabs_list.append("⚙️ Обробка запитів")
@@ -546,7 +532,6 @@ def documents_view():
     with tabs[0]:
         st.subheader("Історія документів")
         
-        # Логіка вибірки: Студент бачить своє, Деканат бачить все + фільтри
         if st.session_state['role'] in ['student', 'starosta']:
             query = f"SELECT id, title as 'Тип документу', status as 'Статус', date as 'Дата подачі' FROM documents WHERE student_name='{st.session_state['full_name']}' ORDER BY id DESC"
         else:
@@ -564,7 +549,6 @@ def documents_view():
         
         df_docs = pd.read_sql(query, conn)
         
-        # Функція для розфарбовування статусів
         def color_status(val):
             color = ''
             if 'Очікує' in str(val): color = '#f0ad4e' # Orange
@@ -626,12 +610,11 @@ def documents_view():
                 st.caption("Для випускників")
                 st.download_button("⬇️ Завантажити PDF", b"template_data", "obhidniy.pdf", key="dl3")
 
-    # --- Вкладка 4: Обробка (Тільки Деканат) ---
+    # --- Вкладка 4: Обробка ---
     if st.session_state['role'] in DEAN_LEVEL:
         with tabs[3]:
             st.subheader("⚙️ Обробка запитів студентів")
             
-            # Отримуємо тільки ті, що мають статус "Очікує"
             pending_docs = pd.read_sql("SELECT id, student_name, title, date FROM documents WHERE status='Очікує'", conn)
             
             if not pending_docs.empty:
@@ -640,10 +623,8 @@ def documents_view():
                 col_sel, col_act = st.columns([1, 2])
                 
                 with col_sel:
-                    # Вибір запиту для обробки
                     req_id = st.selectbox("Оберіть запит", pending_docs['id'].tolist(), format_func=lambda x: f"ID {x}")
                 
-                # Отримуємо дані обраного запиту
                 sel_row = pending_docs[pending_docs['id']==req_id].iloc[0]
                 
                 with col_act:
@@ -676,7 +657,6 @@ def file_repository_view():
     col_f1, col_f2 = st.columns([2,1])
     with col_f1: filter_subj = st.selectbox("📂 Фільтр по предмету", ["Всі"] + SUBJECTS_LIST)
     
-    # Завантаження файлів: ВЧИТЕЛЬ + ДЕКАНАТ (TEACHER_LEVEL)
     if st.session_state['role'] in TEACHER_LEVEL:
         with st.expander("📤 Завантажити"):
             with st.form("upload_form"):
@@ -720,7 +700,6 @@ def gradebook_view():
         df = pd.read_sql(f"SELECT subject, type_of_work, grade, date FROM grades WHERE student_name='{st.session_state['full_name']}'", conn)
         st.dataframe(df, use_container_width=True)
     else:
-        # ВЧИТЕЛЬ ТА ДЕКАНАТ РЕДАГУЮТЬ
         t_journal, t_ops = st.tabs(["Журнал", "📥/📤 Операції"])
         c1, c2 = st.columns(2)
         grp = c1.selectbox("Група", list(GROUPS_DATA.keys()))
@@ -774,12 +753,10 @@ def gradebook_view():
 def attendance_view():
     st.title("📝 Журнал Відвідуваності")
     conn = create_connection()
-    # СТУДЕНТ ТІЛЬКИ ЧИТАЄ
     if st.session_state['role'] == 'student':
         df_att = pd.read_sql(f"SELECT subject, date_column as 'Дата', status FROM attendance WHERE student_name='{st.session_state['full_name']}'", conn)
         st.dataframe(df_att, use_container_width=True)
     else:
-        # Староста/Викладач/Деканат редагують
         c1, c2 = st.columns(2)
         grp = c1.selectbox("Група", list(GROUPS_DATA.keys()), key="att_grp")
         subj = c2.selectbox("Предмет", SUBJECTS_LIST, key="att_sbj")
