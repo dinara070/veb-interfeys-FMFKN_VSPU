@@ -8,7 +8,7 @@ import altair as alt
 import re  # Для логіки переведення курсів
 
 # --- КОНФІГУРАЦІЯ СТОРІНКИ ---
-st.set_page_config(page_title="LMS ФМФКН - Деканат", layout="wide", page_icon="🎓")
+st.set_page_config(page_title="ФМФКН - Деканат", layout="wide", page_icon="🎓")
 
 # --- ЛОГІКА ПЕРЕМИКАННЯ ТЕМИ ---
 if 'theme' not in st.session_state:
@@ -291,7 +291,7 @@ def login_register_page():
                 st.warning("Будь ласка, заповніть усі поля.")
 
 def main_panel():
-    st.title("🏠 Головна панель LMS")
+    st.title("🏠 Головна панель")
     st.markdown(f"### Вітаємо, {st.session_state['full_name']}!")
     conn = create_connection()
     
