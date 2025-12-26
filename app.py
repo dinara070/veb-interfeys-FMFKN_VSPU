@@ -768,64 +768,104 @@ def file_repository_view():
                             st.rerun()
     else: st.info("Наразі дані не завантажені.")
 
+import pandas as pd
+import io
+import streamlit as st
+
 def gradebook_view():
     st.title("💯 Журнал Оцінок")
     conn = create_connection()
     c = conn.cursor()
+
     # СТУДЕНТ ТА СТАРОСТА ТІЛЬКИ ЧИТАЮТЬ
     if st.session_state['role'] in ['student', 'starosta']:
         df = pd.read_sql(f"SELECT subject, type_of_work, grade, date FROM grades WHERE student_name='{st.session_state['full_name']}'", conn)
         st.dataframe(df, use_container_width=True)
     else:
         t_journal, t_ops = st.tabs(["Журнал", "📥/📤 Операції"])
-        c1, c2 = st.columns(2)
+        
+        # --- ФІЛЬТРИ ---
+        c1, c2, c3 = st.columns(3)
         grp = c1.selectbox("Група", list(GROUPS_DATA.keys()))
-        subj = c2.selectbox("Предмет", SUBJECTS_LIST)
+        
+        # Вибірка студентів для обраної групи
+        stds_df = pd.read_sql(f"SELECT full_name FROM students WHERE group_name='{grp}'", conn)
+        students_in_group = stds_df['full_name'].tolist() if not stds_df.empty else []
+        selected_student = c2.selectbox("Студент", ["Всі студенти"] + students_in_group)
+        
+        subj = c3.selectbox("Предмет", SUBJECTS_LIST)
+
         with t_journal:
             with st.expander("➕ Додати колонку"):
                 with st.form("new_col"):
                     nm = st.text_input("Назва")
                     dt = st.date_input("Дата")
                     if st.form_submit_button("Створити"):
-                        stds = pd.read_sql(f"SELECT full_name FROM students WHERE group_name='{grp}'", conn)['full_name'].tolist()
-                        for s in stds:
-                            c.execute("INSERT INTO grades (student_name, group_name, subject, type_of_work, grade, date) VALUES (?,?,?,?,?,?)", (s, grp, subj, nm, 0, str(dt)))
-                        conn.commit()
-                        st.rerun()
-            raw = pd.read_sql(f"SELECT student_name, type_of_work, grade FROM grades WHERE group_name='{grp}' AND subject='{subj}'", conn)
+                        if nm and students_in_group:
+                            for s in students_in_group:
+                                c.execute("INSERT INTO grades (student_name, group_name, subject, type_of_work, grade, date) VALUES (?,?,?,?,?,?)", 
+                                         (s, grp, subj, nm, 0, str(dt)))
+                            conn.commit()
+                            st.rerun()
+                        else: st.warning("Перевірте назву або наявність студентів у групі.")
+
+            # Фільтрація запитів
+            query = f"SELECT student_name, type_of_work, grade FROM grades WHERE group_name='{grp}' AND subject='{subj}'"
+            if selected_student != "Всі студенти":
+                query += f" AND student_name='{selected_student}'"
+            
+            raw = pd.read_sql(query, conn)
+
             if not raw.empty:
                 matrix = raw.pivot_table(index='student_name', columns='type_of_work', values='grade', aggfunc='first').fillna(0)
                 edited = st.data_editor(matrix, use_container_width=True)
+                
                 if st.button("Зберегти зміни"):
-                    changes_made = False
                     for s_name, row in edited.iterrows():
                         for w_name, val in row.items():
-                            old_row = c.execute("SELECT id, grade FROM grades WHERE student_name=? AND subject=? AND type_of_work=?", (s_name, subj, w_name)).fetchone()
-                            if old_row:
-                                old_grade = old_row[1]
-                                if old_grade != val:
-                                    c.execute("UPDATE grades SET grade=? WHERE id=?", (val, old_row[0]))
-                                    log_action(st.session_state['full_name'], "Grade Update", f"{s_name} | {subj} | {w_name}: {old_grade} -> {val}")
-                                    changes_made = True
+                            c.execute("UPDATE grades SET grade=? WHERE student_name=? AND subject=? AND type_of_work=?", 
+                                      (val, s_name, subj, w_name))
                     conn.commit()
-                    if changes_made:
-                        st.success("Збережено та залоговано!")
-                    else:
-                        st.info("Змін не виявлено.")
-            else: st.info("Додайте колонку.")
+                    st.success("Дані оновлено!")
+            else: st.info("Даних немає. Додайте колонку.")
+
         with t_ops:
+            st.subheader("📤 Експорт")
             raw_export = pd.read_sql(f"SELECT * FROM grades WHERE group_name='{grp}' AND subject='{subj}'", conn)
-            st.download_button("⬇️ Експорт (Raw)", convert_df_to_csv(raw_export), "grades_raw.csv", "text/csv")
-            if not raw.empty: st.download_button("⬇️ Експорт (Matrix)", convert_df_to_csv(matrix), "grades_matrix.csv", "text/csv")
             
-            up_grades = st.file_uploader("Імпорт оцінок (CSV)", type="csv")
-            if up_grades and st.button("Імпортувати"):
+            col_ex1, col_ex2 = st.columns(2)
+            
+            # Експорт у CSV (Працює завжди)
+            csv_data = raw_export.to_csv(index=False).encode('utf-8-sig')
+            col_ex1.download_button("📄 Експорт CSV", csv_data, "grades.csv", "text/csv")
+            
+            # БЕЗПЕЧНИЙ Експорт у Excel
+            try:
+                buffer = io.BytesIO()
+                # Спроба використати Excel двигун
+                with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
+                    raw_export.to_excel(writer, index=False)
+                col_ex2.download_button("📊 Експорт Excel", buffer.getvalue(), "grades.xlsx")
+            except Exception:
+                # Якщо бібліотеки немає, показуємо кнопку як неактивну або попередження
+                col_ex2.info("Excel тимчасово недоступний (використовуйте CSV)")
+
+            st.divider()
+            st.subheader("📥 Імпорт")
+            up_file = st.file_uploader("Оберіть файл (CSV або XLSX)", type=["csv", "xlsx"])
+            
+            if up_file and st.button("🚀 Виконати імпорт"):
                 try:
-                    df_new = pd.read_csv(up_grades)
+                    if up_file.name.endswith('.csv'):
+                        df_new = pd.read_csv(up_file)
+                    else:
+                        df_new = pd.read_excel(up_file)
+                    
                     df_new.to_sql('grades', conn, if_exists='append', index=False)
-                    st.success("Імпортовано!")
+                    st.success("Успішно імпортовано!")
                     st.rerun()
-                except Exception as e: st.error(f"Помилка: {e}")
+                except Exception as e:
+                    st.error(f"Помилка імпорту: {e}")
 
 import io
 import pandas as pd
