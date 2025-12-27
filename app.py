@@ -5,7 +5,7 @@ import hashlib
 from datetime import datetime
 import io
 import altair as alt
-import re  # Для логіки переведення курсів
+import re
 
 # --- КОНФІГУРАЦІЯ СТОРІНКИ ---
 st.set_page_config(page_title="ФМФКН - Деканат", layout="wide", page_icon="🎓")
@@ -653,7 +653,7 @@ def documents_view():
                 st.success("Запит успішно надіслано!")
                 st.rerun()
 
-    # --- Вкладка 2: Обробка (Тут була головна помилка IndexError) ---
+    # --- Вкладка 2: Обробка ---
     if show_admin:
         with tabs[2]: # Змінено з tabs[3] на tabs[2]
             st.subheader("⚙️ Обробка запитів студентів")
