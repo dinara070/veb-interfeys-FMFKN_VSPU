@@ -3,6 +3,7 @@ import sqlite3
 import pandas as pd
 import hashlib
 from datetime import datetime
+from fpdf import FPDF
 import io
 import altair as alt
 import re  # Для логіки переведення курсів
@@ -680,15 +681,47 @@ def documents_view():
         
         with c2:
             with st.container(border=True):
-                # Змінено заголовок та прибрано "Ордер на поселення"
                 st.markdown("📄 **Заява на гуртожиток**")
                 st.caption("Зразок на ім'я проректора Бровчака Л. С.")
                 
-                # Тут ви можете підставити реальні дані файлу у форматі PDF або DOCX
+                # Логіка генерації PDF на льоту
+                def generate_dorm_pdf():
+                    pdf = FPDF()
+                    pdf.add_page()
+                    # Додаємо шрифт, що підтримує кирилицю (переконайтеся, що шлях до .ttf вірний або використовуйте стандартний)
+                    pdf.set_font("Arial", size=12) 
+                    
+                    # Текст заяви з вашого зразка
+                    header = (
+                        "Проректорові\n"
+                        "з науково-педагогічної роботи\n"
+                        "та соціальних питань\n"
+                        "доц. Бровчаку Л. С.\n\n"
+                        "____________________ (група)\n"
+                        "____________________ (спеціальність)\n"
+                        "____________________ (ПІБ повністю)\n"
+                        "Адреса: __________________\n"
+                        "Моб. тел: ________________"
+                    )
+                    
+                    pdf.multi_cell(0, 10, txt=header, align='R')
+                    pdf.ln(20)
+                    pdf.set_font("Arial", 'B', 14)
+                    pdf.cell(0, 10, txt="Заява", align='C', ln=1)
+                    pdf.ln(10)
+                    pdf.set_font("Arial", size=12)
+                    pdf.multi_cell(0, 10, txt="Прошу Вашого дозволу на проживання в гуртожитку у зв'язку з _________________________________________________________________.")
+                    pdf.ln(30)
+                    pdf.cell(0, 10, txt="Дата: __________                                 Підпис: __________")
+                    
+                    return pdf.output()
+
+                # Створення кнопки завантаження
                 st.download_button(
                     label="⬇️ Завантажити PDF", 
-                    data=b"template_data", # Замініть на реальні байти файлу або шлях
+                    data=generate_dorm_pdf(), 
                     file_name="zayava_na_gurtozhitok.pdf", 
+                    mime="application/pdf",
                     key="dl2"
                 )
         
