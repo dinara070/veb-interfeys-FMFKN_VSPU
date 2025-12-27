@@ -601,53 +601,44 @@ def documents_view():
     st.title("📂 Документообіг та Заяви")
     conn = create_connection()
     
-    tabs_list = ["📂 Реєстр / Мої заяви", "➕ Створити заяву", "📄 Шаблони заяв"]
-    if st.session_state['role'] in DEAN_LEVEL:
+    # Визначаємо список вкладок. Тепер їх лише дві основних
+    tabs_list = ["📂 Реєстр / Мої заяви", "➕ Створити заяву"]
+    
+    # Якщо користувач — адміністратор, додаємо ТРЕТЮ вкладку (індекс 2)
+    show_admin = st.session_state['role'] in DEAN_LEVEL
+    if show_admin:
         tabs_list.append("⚙️ Обробка запитів")
     
     tabs = st.tabs(tabs_list)
 
-    # --- Вкладка 1: Реєстр ---
+    # --- Вкладка 0: Реєстр ---
     with tabs[0]:
         st.subheader("Історія документів")
-        
         if st.session_state['role'] in ['student', 'starosta']:
             query = f"SELECT id, title as 'Тип документу', status as 'Статус', date as 'Дата подачі' FROM documents WHERE student_name='{st.session_state['full_name']}' ORDER BY id DESC"
         else:
             c1, c2 = st.columns([1, 3])
-            with c1:
-                filter_status = st.selectbox("Фільтр за статусом", ["Всі", "Очікує", "Готово", "Відхилено"])
-            
+            filter_status = c1.selectbox("Фільтр за статусом", ["Всі", "Очікує", "Готово", "Відхилено"])
             base_q = "SELECT id, student_name as 'Студент', title as 'Тип документу', status as 'Статус', date as 'Дата' FROM documents"
-            
-            if filter_status != "Всі":
-                # Фільтруємо по частині слова, щоб знайти "Готово (каб 102)"
-                query = f"{base_q} WHERE status LIKE '{filter_status}%' ORDER BY id DESC"
+            query = f"{base_q} WHERE status LIKE '{filter_status}%' ORDER BY id DESC" if filter_status != "Всі" else f"{base_q} ORDER BY id DESC"
+        
+        try:
+            df_docs = pd.read_sql(query, conn)
+            if not df_docs.empty:
+                st.dataframe(df_docs, use_container_width=True)
             else:
-                query = f"{base_q} ORDER BY id DESC"
-        
-        df_docs = pd.read_sql(query, conn)
-        
-        def color_status(val):
-            color = ''
-            if 'Очікує' in str(val): color = '#f0ad4e' # Orange
-            elif 'Готово' in str(val): color = '#5cb85c' # Green
-            elif 'Відхилено' in str(val): color = '#d9534f' # Red
-            return f'color: {color}; font-weight: bold'
-            
-        if not df_docs.empty:
-            st.dataframe(df_docs.style.map(color_status, subset=['Статус']), use_container_width=True)
-        else:
-            st.info("Список документів порожній")
+                st.info("Список документів порожній")
+        except Exception as e:
+            st.error(f"Помилка завантаження даних: {e}")
 
-    # --- Вкладка 2: Створити ---
+    # --- Вкладка 1: Створити ---
     with tabs[1]:
         st.subheader("Подання нового запиту")
         with st.form("doc_create"):
             d_type = st.selectbox("Тип документу", [
                 "Довідка про навчання (для ТЦК/Військкомату)",
                 "Довідка про навчання (за місцем вимоги)",
-                "Довідка про доходи (для субсидії/декларації)",
+                "Довідка про доходи",
                 "Виписка з оцінками (Transcript)",
                 "Заява на матеріальну допомогу",
                 "Заява на поселення в гуртожиток",
@@ -656,120 +647,38 @@ def documents_view():
             d_comment = st.text_input("Додаткові примітки (напр. 'В ТЦК м. Вінниця' або 'Терміново')")
             
             if st.form_submit_button("Надіслати запит"):
-                # Формуємо повну назву із коментарем
-                full_title = f"{d_type}"
-                if d_comment:
-                    full_title += f" ({d_comment})"
-                
+                full_title = f"{d_type}" + (f" ({d_comment})" if d_comment else "")
                 conn.execute("INSERT INTO documents (title, student_name, status, date) VALUES (?,?,?,?)", 
                              (full_title, st.session_state['full_name'], "Очікує", str(datetime.now().date())))
                 conn.commit()
-                st.success("Запит успішно надіслано до деканату! Відстежуйте статус у першій вкладці.")
+                st.success("Запит успішно надіслано!")
                 st.rerun()
 
-# --- Вкладка 3: Шаблони ---
-    with tabs[2]:
-        st.subheader("Бланки та зразки заяв")
-        st.caption("Завантажте, роздрукуйте та підпишіть, якщо потрібна паперова копія.")
-        
-        c1, c2, c3 = st.columns(3)
-        with c1:
-            with st.container(border=True):
-                st.markdown("📄 **Заява на вступ**")
-                st.caption("Для абітурієнтів")
-                st.download_button("⬇️ Завантажити DOCX", b"template_data", "zayava_vstup.docx", key="dl1")
-        
-        with c2:
-            with st.container(border=True):
-                st.markdown("📄 **Заява на гуртожиток**")
-                st.caption("Зразок на ім'я проректора Бровчака Л. С.")
-                
-                # Логіка генерації PDF на льоту
-                def generate_dorm_pdf():
-                    pdf = FPDF()
-                    pdf.add_page()
-                    # Додаємо шрифт, що підтримує кирилицю (переконайтеся, що шлях до .ttf вірний або використовуйте стандартний)
-                    pdf.set_font("Arial", size=12) 
-                    
-                    # Текст заяви з вашого зразка
-                    header = (
-                        "Проректорові\n"
-                        "з науково-педагогічної роботи\n"
-                        "та соціальних питань\n"
-                        "доц. Бровчаку Л. С.\n\n"
-                        "____________________ (група)\n"
-                        "____________________ (спеціальність)\n"
-                        "____________________ (ПІБ повністю)\n"
-                        "Адреса: __________________\n"
-                        "Моб. тел: ________________"
-                    )
-                    
-                    pdf.multi_cell(0, 10, txt=header, align='R')
-                    pdf.ln(20)
-                    pdf.set_font("Arial", 'B', 14)
-                    pdf.cell(0, 10, txt="Заява", align='C', ln=1)
-                    pdf.ln(10)
-                    pdf.set_font("Arial", size=12)
-                    pdf.multi_cell(0, 10, txt="Прошу Вашого дозволу на проживання в гуртожитку у зв'язку з _________________________________________________________________.")
-                    pdf.ln(30)
-                    pdf.cell(0, 10, txt="Дата: __________                                 Підпис: __________")
-                    
-                    return pdf.output()
-
-                # Створення кнопки завантаження
-                st.download_button(
-                    label="⬇️ Завантажити PDF", 
-                    data=generate_dorm_pdf(), 
-                    file_name="zayava_na_gurtozhitok.pdf", 
-                    mime="application/pdf",
-                    key="dl2"
-                )
-        
-        with c3:
-            with st.container(border=True):
-                st.markdown("📄 **Обхідний лист**")
-                st.caption("Для випускників")
-                st.download_button("⬇️ Завантажити PDF", b"template_data", "obhidniy.pdf", key="dl3")
-
-    # --- Вкладка 4: Обробка ---
-    if st.session_state['role'] in DEAN_LEVEL:
-        with tabs[3]:
+    # --- Вкладка 2: Обробка (Тут була головна помилка IndexError) ---
+    if show_admin:
+        with tabs[2]: # Змінено з tabs[3] на tabs[2]
             st.subheader("⚙️ Обробка запитів студентів")
-            
             pending_docs = pd.read_sql("SELECT id, student_name, title, date FROM documents WHERE status='Очікує'", conn)
             
             if not pending_docs.empty:
-                st.warning(f"Увага! Необроблених запитів: {len(pending_docs)}")
-                
-                col_sel, col_act = st.columns([1, 2])
-                
-                with col_sel:
-                    req_id = st.selectbox("Оберіть запит", pending_docs['id'].tolist(), format_func=lambda x: f"ID {x}")
-                
+                st.warning(f"Необроблених запитів: {len(pending_docs)}")
+                req_id = st.selectbox("Оберіть запит", pending_docs['id'].tolist(), format_func=lambda x: f"ID {x}")
                 sel_row = pending_docs[pending_docs['id']==req_id].iloc[0]
                 
-                with col_act:
-                    with st.container(border=True):
-                        st.markdown(f"**Студент:** {sel_row['student_name']}")
-                        st.markdown(f"**Запит:** {sel_row['title']}")
-                        st.markdown(f"**Дата:** {sel_row['date']}")
-                        st.divider()
-                        
-                        ac1, ac2 = st.columns(2)
-                        new_status = ac1.selectbox("Рішення", ["Готово", "Відхилено", "В роботі"])
-                        admin_comment = ac2.text_input("Коментар для студента", placeholder="Напр. 'Заберіть у 205 каб.'")
-                        
-                        if st.button("✅ Застосувати рішення"):
-                            final_status = new_status
-                            if admin_comment:
-                                final_status += f" ({admin_comment})"
-                            
-                            conn.execute("UPDATE documents SET status=? WHERE id=?", (final_status, req_id))
-                            conn.commit()
-                            st.success(f"Статус запиту #{req_id} змінено на '{final_status}'")
-                            st.rerun()
+                with st.container(border=True):
+                    st.markdown(f"**Студент:** {sel_row['student_name']} | **Запит:** {sel_row['title']}")
+                    ac1, ac2 = st.columns(2)
+                    new_status = ac1.selectbox("Рішення", ["Готово", "Відхилено", "В роботі"])
+                    admin_comment = ac2.text_input("Коментар", placeholder="каб. 205")
+                    
+                    if st.button("✅ Застосувати рішення"):
+                        final_status = new_status + (f" ({admin_comment})" if admin_comment else "")
+                        conn.execute("UPDATE documents SET status=? WHERE id=?", (final_status, req_id))
+                        conn.commit()
+                        st.success("Статус оновлено")
+                        st.rerun()
             else:
-                st.success("🎉 Чудова робота! Всі нові запити опрацьовано.")
+                st.success("🎉 Всі запити опрацьовано!")
 
 def file_repository_view():
     st.title("🗄️ Файловий Репозиторій")
