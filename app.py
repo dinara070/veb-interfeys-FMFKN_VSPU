@@ -1118,9 +1118,16 @@ def reports_view():
 
     with t3:
         st.subheader("Генератор Зведеної Відомості")
-        grp_sum = st.selectbox("Оберіть групу", list(GROUPS_DATA.keys()), key="rep_sum_grp")
         
-        # --- БЛОК ІМПОРТУ (для масового оновлення оцінок у групі) ---
+        # Отримуємо список груп безпосередньо з бази даних, щоб уникнути розбіжностей
+        try:
+            db_groups = pd.read_sql("SELECT DISTINCT group_name FROM students", conn)['group_name'].tolist()
+        except:
+            db_groups = list(GROUPS_DATA.keys())
+            
+        grp_sum = st.selectbox("Оберіть групу", db_groups, key="rep_sum_grp")
+        
+        # --- БЛОК ІМПОРТУ ---
         with st.expander("📥 Імпорт даних у зведену відомість"):
             up_file = st.file_uploader("Завантажте CSV або Excel", type=['csv', 'xlsx'], key="import_sum")
             if up_file and st.button("🚀 Виконати імпорт"):
@@ -1132,38 +1139,63 @@ def reports_view():
                 except Exception as e:
                     st.error(f"Помилка імпорту: {e}")
 
-        available_subjects_query = f"SELECT DISTINCT subject FROM grades WHERE group_name='{grp_sum}'"
-        available_subjects = pd.read_sql(available_subjects_query, conn)['subject'].tolist()
-        if not available_subjects: available_subjects = SUBJECTS_LIST
-        selected_subjects = st.multiselect("Оберіть предмети для відомості", options=available_subjects, default=available_subjects)
+        # Безпечне отримання списку предметів саме для цієї групи
+        try:
+            available_subjects_query = f"SELECT DISTINCT subject FROM grades WHERE group_name='{grp_sum}'"
+            available_subjects = pd.read_sql(available_subjects_query, conn)['subject'].tolist()
+        except:
+            available_subjects = []
+
+        if not available_subjects:
+            available_subjects = SUBJECTS_LIST
+            
+        selected_subjects = st.multiselect("Оберіть предмети для відомості", options=available_subjects, default=available_subjects[:5] if len(available_subjects) > 5 else available_subjects)
         
         if st.button("🔄 Згенерувати таблицю"):
             if selected_subjects:
-                subjects_placeholder = "'" + "','".join(selected_subjects) + "'"
-                query = f"""SELECT student_name, subject, AVG(grade) as final_grade FROM grades WHERE group_name='{grp_sum}' AND subject IN ({subjects_placeholder}) GROUP BY student_name, subject"""
-                data = pd.read_sql(query, conn)
-                if not data.empty:
-                    summary_matrix = data.pivot_table(index='student_name', columns='subject', values='final_grade').fillna(0).round(0).astype(int)
-                    all_students_df = pd.read_sql(f"SELECT full_name FROM students WHERE group_name='{grp_sum}'", conn)
-                    summary_matrix = all_students_df.merge(summary_matrix, left_on='full_name', right_index=True, how='left').fillna(0)
-                    summary_matrix.set_index('full_name', inplace=True)
+                try:
+                    # Використовуємо параметризований запит для безпеки
+                    subjects_placeholder = ",".join(["?"] * len(selected_subjects))
+                    query = f"""
+                        SELECT student_name, subject, AVG(grade) as final_grade 
+                        FROM grades 
+                        WHERE group_name = ? AND subject IN ({subjects_placeholder}) 
+                        GROUP BY student_name, subject
+                    """
+                    params = [grp_sum] + selected_subjects
+                    data = pd.read_sql(query, conn, params=params)
                     
-                    st.success(f"Згенеровано відомість для групи {grp_sum}")
-                    st.dataframe(summary_matrix, use_container_width=True)
-                    
-                    # --- РОЗШИРЕНИЙ ЕКСПОРТ ДЛЯ ЗВЕДЕНОЇ ---
-                    c_sum1, c_sum2 = st.columns(2)
-                    c_sum1.download_button("⬇️ Експорт CSV", summary_matrix.to_csv().encode('utf-8-sig'), f"zvedena_{grp_sum}.csv")
-                    
-                    try:
-                        buf_sum = io.BytesIO()
-                        with pd.ExcelWriter(buf_sum, engine='xlsxwriter') as writer:
-                            summary_matrix.to_excel(writer)
-                        c_sum2.download_button("📊 Експорт Excel", buf_sum.getvalue(), f"zvedena_{grp_sum}.xlsx")
-                    except:
-                        c_sum2.warning("Excel не підтримується")
-                else: st.warning("Для обраних предметів оцінки відсутні.")
-            else: st.error("Будь ласка, оберіть хоча б один предмет.")
+                    if not data.empty:
+                        # Формуємо матрицю
+                        summary_matrix = data.pivot_table(index='student_name', columns='subject', values='final_grade').fillna(0).round(0).astype(int)
+                        
+                        # Додаємо студентів, у яких немає оцінок (щоб список був повним)
+                        all_students_df = pd.read_sql("SELECT full_name FROM students WHERE group_name=?", conn, params=[grp_sum])
+                        summary_matrix = all_students_df.merge(summary_matrix, left_on='full_name', right_index=True, how='left').fillna(0)
+                        summary_matrix.set_index('full_name', inplace=True)
+                        
+                        st.success(f"Згенеровано відомість для групи {grp_sum}")
+                        st.dataframe(summary_matrix, use_container_width=True)
+                        
+                        # Експорт
+                        c_sum1, c_sum2 = st.columns(2)
+                        csv_out = summary_matrix.to_csv().encode('utf-8-sig')
+                        c_sum1.download_button("⬇️ Експорт CSV", csv_out, f"zvedena_{grp_sum}.csv")
+                        
+                        try:
+                            buf_sum = io.BytesIO()
+                            with pd.ExcelWriter(buf_sum, engine='xlsxwriter') as writer:
+                                summary_matrix.to_excel(writer)
+                            c_sum2.download_button("📊 Експорт Excel", buf_sum.getvalue(), f"zvedena_{grp_sum}.xlsx")
+                        except:
+                            c_sum2.warning("Для експорту в Excel встановіть бібліотеку xlsxwriter")
+                    else:
+                        st.warning("В базі даних не знайдено оцінок для вибраних предметів у цій групі.")
+                except Exception as e:
+                    st.error(f"Помилка бази даних: {e}")
+                    st.info("Переконайтеся, що ви додали оцінки в 'Електронному журналі'.")
+            else:
+                st.error("Будь ласка, оберіть хоча б один предмет.")
 
 def deanery_modules_view():
     st.title("Модулі Деканату")
