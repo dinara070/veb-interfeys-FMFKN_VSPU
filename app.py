@@ -3,7 +3,6 @@ import sqlite3
 import pandas as pd
 import hashlib
 from datetime import datetime
-from fpdf import FPDF
 import io
 import altair as alt
 import re  # Для логіки переведення курсів
