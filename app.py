@@ -56,17 +56,11 @@ if st.session_state.theme == 'dark':
 else:
     st.markdown(light_css, unsafe_allow_html=True)
 
-# --- КОНСТАНТИ ТА ПРАВА ДОСТУПУ ---
-# Словник для відображення зрозумілих назв (як на фото реєстрації)
-STAFF_ROLES_MAP = {
-    "admin": "admin",
-    "dean": "dean",
-    "tech_admin": "tech_admin"
-}
 
-ROLES_LIST = list(STAFF_ROLES_MAP.keys())
-TEACHER_LEVEL = ROLES_LIST + ['teacher']
-DEAN_LEVEL = ROLES_LIST
+# --- КОНСТАНТИ ТА ПРАВА ДОСТУПУ ---
+ROLES_LIST = ["dean", "admin", "tech_admin"]
+TEACHER_LEVEL = ['dean', 'admin', 'tech_admin']
+DEAN_LEVEL = ['dean', 'admin', 'tech_admin']
 
 # --- СПИСОК ПРЕДМЕТІВ ---
 SUBJECTS_LIST = [
@@ -270,8 +264,6 @@ def convert_df_to_csv(df):
 
 # --- СТОРІНКИ ---
 
-# --- СТОРІНКА ВХОДУ ТА РЕЄСТРАЦІЇ ---
-
 def login_register_page():
     st.header("🔐 Вхід / Реєстрація (Адміністрація)")
     action = st.radio("Оберіть дію:", ["Вхід", "Реєстрація"], horizontal=True)
@@ -279,8 +271,8 @@ def login_register_page():
     conn = create_connection()
     c = conn.cursor()
 
-    # Список технічних ключів ролей, яким дозволено вхід
-    ALLOWED_STAFF = list(STAFF_ROLES_MAP.keys())
+    # Оновлений список ролей для реєстрації та перевірки доступу
+    ALLOWED_STAFF = ["admin", "dean", "tech_admin"]
 
     if action == "Вхід":
         username = st.text_input("Логін")
@@ -291,8 +283,8 @@ def login_register_page():
             user = c.fetchone()
             
             if user:
-                # Перевіряємо, чи роль користувача входить до списку дозволених або є викладачем
-                if user[2] not in ALLOWED_STAFF and user[2] != 'teacher':
+                # Перевіряємо, чи роль користувача входить до списку дозволених для цієї панелі
+                if user[2] not in ALLOWED_STAFF:
                     st.error("Доступ обмежено. Тільки для персоналу та адміністрації.")
                 else:
                     st.session_state['logged_in'] = True
@@ -312,7 +304,7 @@ def login_register_page():
         new_user = st.text_input("Вигадайте логін")
         new_pass = st.text_input("Вигадайте пароль", type='password')
         
-        # Вибір ролі: тепер відображається точно як на вашому фото (admin, dean, tech_admin)
+        # Вибір ролі з розширеного списку (включаючи tech_admin)
         role = st.selectbox("Ваша посада / Роль", ALLOWED_STAFF)
         
         full_name = st.text_input("Ваше ПІБ (повністю)")
@@ -326,7 +318,7 @@ def login_register_page():
                     conn.commit()
                     
                     log_action(full_name, "Registration", f"Новий запис: {role}")
-                    st.success(f"Обліковий запис з роллю '{role}' створено! Тепер увійдіть у вкладці 'Вхід'.")
+                    st.success("Обліковий запис створено! Тепер увійдіть у вкладці 'Вхід'.")
                 except sqlite3.IntegrityError:
                     st.error("Цей логін вже зайнятий.")
             else:
