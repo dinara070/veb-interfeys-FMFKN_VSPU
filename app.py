@@ -270,6 +270,8 @@ def convert_df_to_csv(df):
 
 # --- СТОРІНКИ ---
 
+# --- СТОРІНКА ВХОДУ ТА РЕЄСТРАЦІЇ ---
+
 def login_register_page():
     st.header("🔐 Вхід / Реєстрація (Адміністрація)")
     action = st.radio("Оберіть дію:", ["Вхід", "Реєстрація"], horizontal=True)
@@ -277,13 +279,6 @@ def login_register_page():
     conn = create_connection()
     c = conn.cursor()
 
-    # Словник для відображення зрозумілих назв у меню реєстрації
-    STAFF_ROLES_MAP = {
-        "admin": "Головний Адміністратор",
-        "dean": "Деканат / Декан",
-        "tech_admin": "Технічний адміністратор"
-    }
-    
     # Список технічних ключів ролей, яким дозволено вхід
     ALLOWED_STAFF = list(STAFF_ROLES_MAP.keys())
 
@@ -317,11 +312,8 @@ def login_register_page():
         new_user = st.text_input("Вигадайте логін")
         new_pass = st.text_input("Вигадайте пароль", type='password')
         
-        # Вибір ролі: показуємо гарні назви зі словника
-        role_display = st.selectbox("Ваша посада / Роль", list(STAFF_ROLES_MAP.values()))
-        
-        # Конвертуємо вибрану гарну назву назад у технічний ключ (напр. "tech_admin")
-        role = [k for k, v in STAFF_ROLES_MAP.items() if v == role_display][0]
+        # Вибір ролі: тепер відображається точно як на вашому фото (admin, dean, tech_admin)
+        role = st.selectbox("Ваша посада / Роль", ALLOWED_STAFF)
         
         full_name = st.text_input("Ваше ПІБ (повністю)")
         group_link = "Staff/Admin"
@@ -334,7 +326,7 @@ def login_register_page():
                     conn.commit()
                     
                     log_action(full_name, "Registration", f"Новий запис: {role}")
-                    st.success(f"Обліковий запис '{role_display}' створено! Тепер увійдіть у вкладці 'Вхід'.")
+                    st.success(f"Обліковий запис з роллю '{role}' створено! Тепер увійдіть у вкладці 'Вхід'.")
                 except sqlite3.IntegrityError:
                     st.error("Цей логін вже зайнятий.")
             else:
