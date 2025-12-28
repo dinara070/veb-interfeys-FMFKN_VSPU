@@ -56,12 +56,17 @@ if st.session_state.theme == 'dark':
 else:
     st.markdown(light_css, unsafe_allow_html=True)
 
-
 # --- КОНСТАНТИ ТА ПРАВА ДОСТУПУ ---
-# Додаємо "Технічний адміністратор" до загального списку та рівнів доступу
-ROLES_LIST = ["dean", "admin", "tech_admin"]
-TEACHER_LEVEL = ['dean', 'admin', 'tech_admin', 'teacher']
-DEAN_LEVEL = ['dean', 'admin', 'tech_admin']
+# Словник для відображення зрозумілих назв (як на фото реєстрації)
+STAFF_ROLES_MAP = {
+    "admin": "admin",
+    "dean": "dean",
+    "tech_admin": "tech_admin"
+}
+
+ROLES_LIST = list(STAFF_ROLES_MAP.keys())
+TEACHER_LEVEL = ROLES_LIST + ['teacher']
+DEAN_LEVEL = ROLES_LIST
 
 # --- СПИСОК ПРЕДМЕТІВ ---
 SUBJECTS_LIST = [
