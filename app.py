@@ -26,32 +26,69 @@ def toggle_theme():
 # --- CSS СТИЛІ ---
 # Тут ми вручну прописуємо стилі (кольори фону, тексту, кнопок) для кожного режиму.
 # Ми використовуємо HTML-тег <style> через st.markdown, щоб обійти стандартні обмеження Streamlit.
+# Визначаємо змінну з CSS-кодом для темного режиму інтерфейсу
 dark_css = """
 <style>
+    /* Головний контейнер додатка: встановлюємо темно-синій фон та білий колір тексту */
     .stApp { background-color: #0E1117; color: #FFFFFF; }
+
+    /* Бокова панель (Sidebar): міняємо фон на трохи світліший сірий для візуального виділення */
     [data-testid="stSidebar"] { background-color: #262730; }
+
+    /* Текстові елементи: заголовки (h1-h6), параграфи, списки та звичайна розмітка.
+       !important гарантує, що наш білий колір перекриє стандартні стилі Streamlit */
     h1, h2, h3, h4, h5, h6, p, li, span, label, .stMarkdown { color: #FFFFFF !important; }
-    .stTextInput > div > div, .stSelectbox > div > div, .stTextArea > div > div, .stDateInput > div > div, .stNumberInput > div > div {
+
+    /* Поля вводу (текст, випадаючі списки, дати, числа): 
+       встановлюємо темний фон та білий шрифт для зручного читання */
+    .stTextInput > div > div, .stSelectbox > div > div, .stTextArea > div > div, 
+    .stDateInput > div > div, .stNumberInput > div > div {
         background-color: #41444C !important; color: #FFFFFF !important;
     }
+
+    /* Безпосередньо самі теги вводу всередині контейнерів */
     input, textarea { color: #FFFFFF !important; }
+
+    /* Таблиці та датафрейми (Pandas): примусово встановлюємо білий текст для клітинок */
     [data-testid="stDataFrame"], [data-testid="stTable"] { color: #FFFFFF !important; }
+
+    /* Розгортальні блоки (Expander): стилізуємо заголовок блоку під колір бокової панелі */
     .streamlit-expanderHeader { background-color: #262730 !important; color: #FFFFFF !important; }
+
+    /* Кнопки: робимо текст на кнопках білим */
     button { color: #FFFFFF !important; }
 </style>
 """
 
+# Визначаємо змінну з CSS-кодом для стандартного світлого режиму
 light_css = """
 <style>
+    /* Головний контейнер додатка: чистий білий фон та чорний колір тексту */
     .stApp { background-color: #FFFFFF; color: #000000; }
+
+    /* Бокова панель: світло-сірий фон для контрасту з основною білою областю */
     [data-testid="stSidebar"] { background-color: #F0F2F6; }
+
+    /* Всі текстові елементи примусово робимо чорними для максимальної чіткості */
     h1, h2, h3, h4, h5, h6, p, li, span, label, .stMarkdown { color: #000000 !important; }
-    .stTextInput > div > div, .stSelectbox > div > div, .stTextArea > div > div, .stDateInput > div > div, .stNumberInput > div > div {
+
+    /* Поля вводу: білий фон, чорний текст та тонка сіра рамка (border) 
+       для кращого відображення на білому фоні */
+    .stTextInput > div > div, .stSelectbox > div > div, .stTextArea > div > div, 
+    .stDateInput > div > div, .stNumberInput > div > div {
         background-color: #FFFFFF !important; color: #000000 !important; border: 1px solid #D3D3D3;
     }
+
+    /* Чорний шрифт для тексту, який вводить користувач */
     input, textarea { color: #000000 !important; }
+
+    /* Чорний текст для всіх таблиць та звітів */
     [data-testid="stDataFrame"], [data-testid="stTable"] { color: #000000 !important; }
+
+    /* Заголовки Expander-ів у світлому режимі робимо сірими */
     .streamlit-expanderHeader { background-color: #F0F2F6 !important; color: #000000 !important; }
+
+    /* Чорний текст для кнопок */
     button { color: #000000 !important; }
 </style>
 """
