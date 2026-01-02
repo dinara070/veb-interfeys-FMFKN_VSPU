@@ -238,6 +238,8 @@ def init_db():
     c.execute('''CREATE TABLE IF NOT EXISTS system_logs(id INTEGER PRIMARY KEY AUTOINCREMENT, user TEXT, action TEXT, details TEXT, timestamp TEXT)''')
     
     # --- ТАБЛИЦІ ДЛЯ АНКЕТИ ТА КОНТРАКТІВ ---
+    # Таблиця для детальної інформації про навчання студента (Електронна анкета)
+    # student_name тут є PRIMARY KEY, тобто один студент має лише один запис.
     c.execute('''CREATE TABLE IF NOT EXISTS student_education_info(
         student_name TEXT PRIMARY KEY,
         status TEXT, study_form TEXT, course INTEGER, is_contract TEXT,
@@ -249,6 +251,8 @@ def init_db():
         student_id_card TEXT, gradebook_id TEXT, library_card TEXT,
         curator TEXT, last_modified TEXT
     )''')
+    
+    # Таблиця для обліку попередньої освіти (звідки прийшов студент)
     c.execute('''CREATE TABLE IF NOT EXISTS student_prev_education(
         student_name TEXT PRIMARY KEY,
         institution_name TEXT, institution_type TEXT,
@@ -256,18 +260,24 @@ def init_db():
         diploma_grades_summary TEXT, foreign_languages TEXT,
         last_modified TEXT
     )''')
+
+    # Реєстр академічних довідок (для тих, хто перевівся з інших університетів)
     c.execute('''CREATE TABLE IF NOT EXISTS academic_certificates(
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         student_name TEXT, cert_number TEXT, issue_date TEXT,
         source_institution TEXT, notes TEXT,
         added_by TEXT, added_date TEXT
     )''')
+
+    # Таблиця для індивідуальних відомостей (академрізниця, перездачі, індивідуальний графік)
     c.execute('''CREATE TABLE IF NOT EXISTS individual_statements(
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         student_name TEXT, subject TEXT, statement_type TEXT,
         reason TEXT, date_issued TEXT, status TEXT,
         created_by TEXT
     )''')
+
+    # Таблиця для фінансового обліку (контрактна форма навчання)
     c.execute('''CREATE TABLE IF NOT EXISTS student_contracts(
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         student_name TEXT,
@@ -281,6 +291,7 @@ def init_db():
     )''')
 
     # --- НОВА ТАБЛИЦЯ: ЕКЗАМЕНАЦІЙНІ ВІДОМОСТІ (СЕСІЯ) ---
+    # Використовується для організації сесійного контролю
     c.execute('''CREATE TABLE IF NOT EXISTS exam_sheets(
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         sheet_number TEXT,
@@ -319,10 +330,13 @@ def convert_df_to_csv(df):
 # --- СТОРІНКИ ---
 
 def login_register_page():
+    # --- ІНТЕРФЕЙС АВТОРИЗАЦІЇ ---
     # Сторінка авторизації. Використовує SQL-запит для перевірки логіна/пароля.
     st.header("🔐 Вхід / Реєстрація (Адміністрація)")
+    # Створюємо перемикач між входом в існуючий акаунт та створенням нового
     action = st.radio("Оберіть дію:", ["Вхід", "Реєстрація"], horizontal=True)
-    
+
+    # Встановлюємо з'єднання з базою даних для перевірки або запису користувачів
     conn = create_connection()
     c = conn.cursor()
 
@@ -370,6 +384,8 @@ def login_register_page():
         if st.button("Зареєструватися"):
             if new_user and new_pass and full_name:
                 try:
+                    # Записуємо нового користувача в таблицю 'users'.
+                    # Пароль обов'язково хешуємо перед збереженням!
                     c.execute('INSERT INTO users VALUES (?,?,?,?,?)', 
                               (new_user, make_hashes(new_pass), role, full_name, group_link))
                     conn.commit()
