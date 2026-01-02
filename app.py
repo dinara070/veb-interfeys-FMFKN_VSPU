@@ -8,19 +8,24 @@ import altair as alt
 import re  # Для логіки переведення курсів
 
 # --- КОНФІГУРАЦІЯ СТОРІНКИ ---
+# Встановлюємо заголовок вкладки браузера, іконку та режим "широкого" екрану
 st.set_page_config(page_title="ФМФКН - Деканат", layout="wide", page_icon="🎓")
 
 # --- ЛОГІКА ПЕРЕМИКАННЯ ТЕМИ ---
+# Використовуємо st.session_state, щоб зберегти вибір теми між перезавантаженнями сторінки
 if 'theme' not in st.session_state:
     st.session_state.theme = 'light'
 
 def toggle_theme():
+    # Функція-перемикач: змінює стан теми на протилежний
     if st.session_state.theme == 'light':
         st.session_state.theme = 'dark'
     else:
         st.session_state.theme = 'light'
 
 # --- CSS СТИЛІ ---
+# Тут ми вручну прописуємо стилі (кольори фону, тексту, кнопок) для кожного режиму.
+# Ми використовуємо HTML-тег <style> через st.markdown, щоб обійти стандартні обмеження Streamlit.
 dark_css = """
 <style>
     .stApp { background-color: #0E1117; color: #FFFFFF; }
@@ -51,6 +56,7 @@ light_css = """
 </style>
 """
 
+# Застосовуємо обраний стиль залежно від стану в session_state
 if st.session_state.theme == 'dark':
     st.markdown(dark_css, unsafe_allow_html=True)
 else:
@@ -58,6 +64,7 @@ else:
 
 
 # --- КОНСТАНТИ ТА ПРАВА ДОСТУПУ ---
+# Списки ролей, які використовуються для перевірки прав (наприклад, доступ до адмін-панелі)
 ROLES_LIST = ["dean", "admin"]
 TEACHER_LEVEL = ['dean', 'admin']
 DEAN_LEVEL = ['dean', 'admin']
@@ -162,18 +169,25 @@ TEACHERS_DATA = {
 
 # --- BACKEND ---
 def make_hashes(password):
+    # Хешування паролів: ми не зберігаємо паролі у відкритому вигляді.
+    # Алгоритм SHA-256 перетворює пароль на унікальний рядок символів.
     return hashlib.sha256(str.encode(password)).hexdigest()
 
 def check_hashes(password, hashed_text):
+    # Перевірка пароля: хешуємо введений пароль і порівнюємо з тим, що в базі
     if make_hashes(password) == hashed_text: return True
     return False
 
 def create_connection():
+    # Створюємо з'єднання з файлом бази даних SQLite. 
+    # check_same_thread=False дозволяє Streamlit працювати з базою в багатопоточному режимі.
     return sqlite3.connect('university_v22.db', check_same_thread=False)
 
 def init_db():
+    # Головна функція ініціалізації: створює всі необхідні таблиці, якщо їх ще немає.
     conn = create_connection()
     c = conn.cursor()
+    # Створюємо таблиці: користувачі, студенти, розклад, оцінки, відвідуваність тощо.
     c.execute('''CREATE TABLE IF NOT EXISTS users(username TEXT PRIMARY KEY, password TEXT, role TEXT, full_name TEXT, group_link TEXT)''')
     c.execute('''CREATE TABLE IF NOT EXISTS students(id INTEGER PRIMARY KEY AUTOINCREMENT, full_name TEXT, group_name TEXT)''')
     c.execute('''CREATE TABLE IF NOT EXISTS schedule(id INTEGER PRIMARY KEY AUTOINCREMENT, group_name TEXT, day TEXT, time TEXT, subject TEXT, teacher TEXT)''')
@@ -243,17 +257,20 @@ def init_db():
 
     conn.commit()
 
+    # Початкове наповнення: якщо таблиця студентів порожня, додаємо адміна та дані з GROUPS_DATA
     c.execute('SELECT count(*) FROM students')
     if c.fetchone()[0] == 0:
         c.execute('INSERT OR IGNORE INTO users VALUES (?,?,?,?,?)', ('admin', make_hashes('admin'), 'admin', 'Головний Адміністратор', ''))
+        # Цикл проходить по словнику GROUPS_DATA і записує кожного студента в базу
         for group, names in GROUPS_DATA.items():
             for name in names:
-                clean_name = name.lstrip("0123456789. ")
+                clean_name = name.lstrip("0123456789. ") # Очищення від зайвих цифр у списку
                 c.execute('INSERT INTO students (full_name, group_name) VALUES (?,?)', (clean_name, group))
         conn.commit()
     return conn
 
 def log_action(user, action, details):
+    # Функція аудиту: записує кожну важливу дію (вхід, зміна оцінки) у таблицю системних логів
     conn = create_connection()
     ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     conn.execute("INSERT INTO system_logs (user, action, details, timestamp) VALUES (?,?,?,?)", (user, action, details, ts))
@@ -265,6 +282,7 @@ def convert_df_to_csv(df):
 # --- СТОРІНКИ ---
 
 def login_register_page():
+    # Сторінка авторизації. Використовує SQL-запит для перевірки логіна/пароля.
     st.header("🔐 Вхід / Реєстрація (Адміністрація)")
     action = st.radio("Оберіть дію:", ["Вхід", "Реєстрація"], horizontal=True)
     
@@ -279,6 +297,7 @@ def login_register_page():
         password = st.text_input("Пароль", type='password')
         
         if st.button("Увійти"):
+            # Шукаємо користувача з таким логіном та хешем пароля
             c.execute('SELECT * FROM users WHERE username=? AND password=?', (username, make_hashes(password)))
             user = c.fetchone()
             
@@ -286,7 +305,8 @@ def login_register_page():
                 # Перевіряємо, чи роль користувача входить до списку дозволених для цієї панелі
                 if user[2] not in ALLOWED_STAFF:
                     st.error("Доступ обмежено. Тільки для персоналу та адміністрації.")
-                else:
+                else: 
+                    # Зберігаємо дані користувача в session_state, щоб вони були доступні на всіх сторінках
                     st.session_state['logged_in'] = True
                     st.session_state['username'] = user[0]
                     st.session_state['role'] = user[2]
@@ -295,7 +315,7 @@ def login_register_page():
                     
                     log_action(user[3], "Login", f"Вхід у систему: {user[2]}")
                     st.success(f"Вітаємо, {user[3]}!")
-                    st.rerun()
+                    st.rerun() # Перезавантажуємо додаток, щоб показати головну панель
             else:
                 st.error("Невірний логін або пароль")
 
@@ -325,10 +345,12 @@ def login_register_page():
                 st.warning("Будь ласка, заповніть усі поля.")
 
 def main_panel():
+    # Головна дашборд-панель з візуалізацією статистики
     st.title("🏠 Головна панель")
     st.markdown(f"### Вітаємо, {st.session_state['full_name']}!")
     conn = create_connection()
-    
+
+    # Використовуємо метрики (KPI) для швидкого перегляду кількості студентів та середнього балу
     st.divider()
     st.subheader("📊 Аналітика та Статистика")
     kpi1, kpi2, kpi3 = st.columns(3)
@@ -341,6 +363,7 @@ def main_panel():
         total_students = pd.read_sql_query("SELECT count(*) FROM students", conn).iloc[0,0]
         kpi1.metric("Всього студентів", total_students)
 
+    # Візуалізація через Altair: будуємо графік успішності (стовпчикова діаграма)
     file_count = pd.read_sql_query("SELECT count(*) FROM file_storage", conn).iloc[0,0]
     kpi2.metric("Завантажено матеріалів", file_count)
 
@@ -738,6 +761,7 @@ def gradebook_view():
     c = conn.cursor()
 
     # СТУДЕНТ ТА СТАРОСТА ТІЛЬКИ ЧИТАЮТЬ СВОЇ ОЦІНКИ
+    # Логіка відображення: Студенти бачать список, викладачі - інтерактивну таблицю
     if st.session_state['role'] in ['student', 'starosta']:
         df = pd.read_sql(f"SELECT subject, type_of_work, grade, date FROM grades WHERE student_name='{st.session_state['full_name']}'", conn)
         st.dataframe(df, use_container_width=True)
@@ -778,7 +802,8 @@ def gradebook_view():
             query = f"SELECT student_name, type_of_work, grade FROM grades WHERE group_name='{grp}' AND subject='{subj}'"
             if selected_student != "Всі студенти":
                 query += f" AND student_name='{selected_student}'"
-            
+
+            # Для викладачів: створюємо матрицю через pivot_table (Студенти у рядках, Роботи у стовпцях)
             raw = pd.read_sql(query, conn)
 
             # --- ЛОГІКА ВІДОБРАЖЕННЯ ТА РЕДАГУВАННЯ ---
@@ -792,8 +817,10 @@ def gradebook_view():
                 
                 # ПЕРЕВІРКА РОЛІ: Викладач або Адмін
                 else:
+                    # st.data_editor дозволяє редагувати оцінки прямо в таблиці інтерфейсу
                     edited = st.data_editor(matrix, use_container_width=True)
                     if st.button("Зберегти зміни"):
+                        # При натисканні кнопки проходимо циклом по всіх змінених клітинках і робимо SQL UPDATE
                         for s_name, row in edited.iterrows():
                             for w_name, val in row.items():
                                 c.execute("UPDATE grades SET grade=? WHERE student_name=? AND subject=? AND type_of_work=?", 
@@ -820,7 +847,7 @@ def gradebook_view():
             except Exception:
                 col_ex2.info("Excel тимчасово недоступний (використовуйте CSV)")
 
-            # Імпорт (зазвичай дозволений тех_адміну для налагодження)
+            # Імпорт
             st.divider()
             st.subheader("📥 Імпорт")
             up_file = st.file_uploader("Оберіть файл (CSV або XLSX)", type=["csv", "xlsx"])
@@ -839,6 +866,9 @@ import pandas as pd
 import streamlit as st
 
 def attendance_view():
+    # Модуль відвідуваності: аналогічно журналу будує матрицю через pivot_table,
+    # але замість балів використовує статуси ("н", "присутній").
+    # Включає функцію фільтрації "прогульників" через слайдер (n_filter).
     st.title("📝 Журнал Відвідуваності")
     conn = create_connection()
     
@@ -1586,30 +1616,30 @@ def system_settings_view():
 
 
 def main():
+    # 1. Ініціалізація бази даних при запуску
     init_db()
+    
+    # 2. Перевірка наявності ключа авторизації в пам'яті сесії
     if 'logged_in' not in st.session_state:
         st.session_state['logged_in'] = False
-        st.session_state['role'] = None
-        st.session_state['full_name'] = ""
 
+    # 3. ЛОГІКА ВІДОБРАЖЕННЯ: якщо не зайшли - показуємо вхід, якщо зайшли - робочу панель
     if not st.session_state['logged_in']:
         login_register_page()
     else:
-        # --- ВІДОБРАЖЕННЯ ПРОФІЛЮ ТА РОЛІ В SIDEBAR ---
-        st.sidebar.title(f"👤 {st.session_state['full_name']}")
+        # --- БОКОВА ПАНЕЛЬ (SIDEBAR) ---
+        st.sidebar.title(f"👤 {st.session_state.get('full_name', 'Користувач')}")
         
-        role_upper = st.session_state['role'].upper()
-        
-        # Логіка відображення статусів ролей
-        if st.session_state['role'] == 'student':
+        # Відображення ролі для візуального контролю
+        current_role = st.session_state.get('role', '').lower()
+        if current_role == 'student':
              st.sidebar.markdown("### 🛡️ СТУДЕНТ (READ ONLY)")
-        elif st.session_state['role'] == 'tech_admin':
+        elif current_role == 'tech_admin':
              st.sidebar.markdown("### ⚙️ ТЕХНІЧНИЙ АДМІНІСТРАТОР")
-        elif st.session_state['role'] == 'teacher':
+        elif current_role == 'teacher':
              st.sidebar.markdown("### 👨‍🏫 ВИКЛАДАЧ (ACADEMIC)")
         else:
-             # Для dean, admin, methodist показуємо стандартний підпис
-             st.sidebar.caption(f"Роль: {role_upper}")
+             st.sidebar.caption(f"Роль: {current_role.upper()}")
         
         # Кнопка зміни теми
         if st.sidebar.button("Перемкнути тему 🌓"):
@@ -1619,6 +1649,7 @@ def main():
         st.sidebar.divider()
         
         # --- НАЛАШТУВАННЯ МЕНЮ НАВІГАЦІЇ ---
+        # Спершу створюємо базові пункти, доступні всім авторизованим
         menu_options = {
             "Головна панель": main_panel,
             "Студенти та Групи": students_groups_view,
@@ -1631,17 +1662,18 @@ def main():
             "Файловий репозиторій": file_repository_view
         }
         
-        # Доступ до спецмодулів (tech_admin входить до DEAN_LEVEL)
-        if st.session_state['role'] in DEAN_LEVEL:
+        # Додаємо спецмодулі залежно від прав доступу
+        if current_role in DEAN_LEVEL:
             menu_options["Модулі Деканату"] = deanery_modules_view
             menu_options["Сесія та Рух"] = session_module_view 
         
-        # Доступ до системних налаштувань (тільки для admin)
-        if st.session_state['role'] == 'admin':
+        if current_role == 'admin':
             menu_options["Системні налаштування"] = system_settings_view
 
-        # Відображення вибраної сторінки
+        # Відображення радіокнопок вибору сторінки
         selection = st.sidebar.radio("Навігація", list(menu_options.keys()))
+        
+        # Виклик функції обраної сторінки
         menu_options[selection]()
         
         st.sidebar.divider()
@@ -1651,5 +1683,6 @@ def main():
             st.session_state['logged_in'] = False
             st.rerun()
 
+# Точка входу в програму
 if __name__ == '__main__':
     main()
