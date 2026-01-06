@@ -1453,7 +1453,7 @@ def session_module_view():
             if not sheets_df.empty:
                 st.download_button("⬇️ Завантажити реєстр відомостей", convert_df_to_csv(sheets_df), "exam_sheets.csv", "text/csv")
 
-    # --- ВКЛАДКА 2: ВНЕСЕННЯ ОЦІНОК ---
+# --- ВКЛАДКА 2: ВНЕСЕННЯ ОЦІНОК ---
     with tab_grading:
         st.header("Занесення оцінок до бази даних")
         st.info("Оцінки, внесені тут, автоматично потрапляють у загальний журнал успішності та відомість.")
@@ -1461,11 +1461,11 @@ def session_module_view():
         sheets = pd.read_sql("SELECT id, sheet_number, group_name, subject, control_type FROM exam_sheets WHERE status='Відкрита'", conn)
         
         if not sheets.empty:
-            sheet_options = sheets.apply(lambda x: f"№{x['sheet_number']} | {x['group_name']} | {x['subject']} ({x['control_type']})", axis=1)
+            sheet_options = sheets.apply(lambda x: f"№{x['sheet_number']} | {x['group_name']} | {x['subject']} ({x['control_type']})", axis=1).tolist()
             selected_sheet_str = st.selectbox("Оберіть активну відомість:", sheet_options)
             
             # Отримання даних обраної відомості
-            sheet_idx = sheet_options[sheet_options == selected_sheet_str].index[0]
+            sheet_idx = sheet_options.index(selected_sheet_str)
             sel_sheet_data = sheets.iloc[sheet_idx]
             
             curr_group = sel_sheet_data['group_name']
@@ -1475,8 +1475,7 @@ def session_module_view():
             st.markdown(f"**Група:** {curr_group} | **Предмет:** {curr_subj} | **Тип:** {curr_type}")
             
             students_list = pd.read_sql(f"SELECT full_name FROM students WHERE group_name='{curr_group}'", conn)['full_name'].tolist()
-            existing_grades = pd.read_sql(f"""SELECT student_name, grade FROM grades 
-                                              WHERE group_name='{curr_group}' AND subject='{curr_subj}' AND type_of_work='{curr_type}'""", conn)
+            existing_grades = pd.read_sql(f"SELECT student_name, grade FROM grades WHERE group_name='{curr_group}' AND subject='{curr_subj}' AND type_of_work='{curr_type}'", conn)
             
             data = []
             for student in students_list:
@@ -1487,37 +1486,33 @@ def session_module_view():
             df_grading = pd.DataFrame(data)
             st.write("Проставте оцінки у таблиці нижче:")
 
-edited_grades = st.data_editor(df_grading, use_container_width=True, key="editor_exam")
+            # ВАЖЛИВО: Редактор та кнопка збереження мають бути ВСЕРЕДИНІ блоку if not sheets.empty
+            edited_grades = st.data_editor(df_grading, use_container_width=True, key="editor_exam", hide_index=True)
 
-if st.button("💾 Зберегти оцінки в БД", key="save_exam_grades"):
-    date_now = str(datetime.now().date())
-    count_updated = 0
-    
-    for index, row in edited_grades.iterrows():
-        s_name = row['Студент']
-        s_grade = row['Оцінка']
-        
-        check = c.execute("""
-            SELECT id FROM grades 
-            WHERE student_name=? AND subject=? AND type_of_work=?
-        """, (s_name, curr_subj, curr_type)).fetchone()
-        
-        if check:
-            c.execute("UPDATE grades SET grade=?, date=? WHERE id=?", (s_grade, date_now, check[0]))
+            if st.button("💾 Зберегти оцінки в БД", key="save_exam_grades"):
+                date_now = str(datetime.now().date())
+                count_updated = 0
+                
+                for index, row in edited_grades.iterrows():
+                    s_name = row['Студент']
+                    s_grade = row['Оцінка']
+                    
+                    check = c.execute("SELECT id FROM grades WHERE student_name=? AND subject=? AND type_of_work=?", 
+                                    (s_name, curr_subj, curr_type)).fetchone()
+                    
+                    if check:
+                        c.execute("UPDATE grades SET grade=?, date=? WHERE id=?", (s_grade, date_now, check[0]))
+                    else:
+                        c.execute("INSERT INTO grades (student_name, group_name, subject, type_of_work, grade, date) VALUES (?,?,?,?,?,?)",
+                                    (s_name, curr_group, curr_subj, curr_type, s_grade, date_now))
+                    count_updated += 1
+                
+                conn.commit()
+                st.success(f"Успішно збережено {count_updated} оцінок!")
+                log_action(st.session_state['full_name'], "Exam Grading", f"Внесено оцінки: {curr_group}, {curr_subj}")
+                st.rerun()
         else:
-            c.execute("""
-                INSERT INTO grades (student_name, group_name, subject, type_of_work, grade, date)
-                VALUES (?,?,?,?,?,?)
-            """, (s_name, curr_group, curr_subj, curr_type, s_grade, date_now))
-        
-        count_updated += 1
-    
-    conn.commit()
-    
-    st.success(f"Успішно збережено {count_updated} оцінок!")
-    log_action(st.session_state['full_name'], "Exam Grading", f"Внесено оцінки: {curr_group}, {curr_subj}")
-    
-    st.rerun()
+            st.warning("Немає відкритих відомостей. Спочатку створіть відомість у першій вкладці.")
 
     # --- ВКЛАДКА 3: РУХ КОНТИНГЕНТУ ---
     with tab_movement:
