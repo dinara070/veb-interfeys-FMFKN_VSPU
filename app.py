@@ -9,90 +9,55 @@ import altair as alt
 import re  # Для логіки переведення курсів
 
 # --- КОНФІГУРАЦІЯ СТОРІНКИ ---
-# Встановлюємо заголовок вкладки браузера, іконку та режим "широкого" екрану
 st.set_page_config(page_title="ФМФКН - Деканат", layout="wide", page_icon="🎓")
 
 # --- ЛОГІКА ПЕРЕМИКАННЯ ТЕМИ ---
-# Використовуємо st.session_state, щоб зберегти вибір теми між перезавантаженнями сторінки
 if 'theme' not in st.session_state:
     st.session_state.theme = 'light'
 
 def toggle_theme():
-    # Функція-перемикач: змінює стан теми на протилежний
     if st.session_state.theme == 'light':
         st.session_state.theme = 'dark'
     else:
         st.session_state.theme = 'light'
 
 # --- CSS СТИЛІ ---
-# Тут ми вручну прописуємо стилі (кольори фону, тексту, кнопок) для кожного режиму.
-# Ми використовуємо HTML-тег <style> через st.markdown, щоб обійти стандартні обмеження Streamlit.
-# Визначаємо змінну з CSS-кодом для темного режиму інтерфейсу
 dark_css = """
 <style>
-    /* Головний контейнер додатка: встановлюємо темно-синій фон та білий колір тексту */
     .stApp { background-color: #0E1117; color: #FFFFFF; }
-
-    /* Бокова панель (Sidebar): міняємо фон на трохи світліший сірий для візуального виділення */
     [data-testid="stSidebar"] { background-color: #262730; }
-
-    /* Текстові елементи: заголовки (h1-h6), параграфи, списки та звичайна розмітка.
-       !important гарантує, що наш білий колір перекриє стандартні стилі Streamlit */
     h1, h2, h3, h4, h5, h6, p, li, span, label, .stMarkdown { color: #FFFFFF !important; }
-
-    /* Поля вводу (текст, випадаючі списки, дати, числа): 
-       встановлюємо темний фон та білий шрифт для зручного читання */
     .stTextInput > div > div, .stSelectbox > div > div, .stTextArea > div > div, 
     .stDateInput > div > div, .stNumberInput > div > div {
         background-color: #41444C !important; color: #FFFFFF !important;
     }
-
-    /* Безпосередньо самі теги вводу всередині контейнерів */
     input, textarea { color: #FFFFFF !important; }
-
-    /* Таблиці та датафрейми (Pandas): примусово встановлюємо білий текст для клітинок */
     [data-testid="stDataFrame"], [data-testid="stTable"] { color: #FFFFFF !important; }
-
-    /* Розгортальні блоки (Expander): стилізуємо заголовок блоку під колір бокової панелі */
     .streamlit-expanderHeader { background-color: #262730 !important; color: #FFFFFF !important; }
-
-    /* Кнопки: робимо текст на кнопках білим */
     button { color: #FFFFFF !important; }
 </style>
 """
 
-# Визначаємо змінну з CSS-кодом для стандартного світлого режиму
 light_css = """
 <style>
-    /* Головний контейнер додатка: чистий білий фон та чорний колір тексту */
     .stApp { background-color: #FFFFFF; color: #000000; }
-
-    /* Бокова панель: світло-сірий фон для контрасту з основною білою областю */
     [data-testid="stSidebar"] { background-color: #F0F2F6; }
-
-    /* Всі текстові елементи примусово робимо чорними для максимальної чіткості */
     h1, h2, h3, h4, h5, h6, p, li, span, label, .stMarkdown { color: #000000 !important; }
-
-    /* Поля вводу: білий фон, чорний текст та тонка сіра рамка (border) 
-       для кращого відображення на білому фоні */
     .stTextInput > div > div, .stSelectbox > div > div, .stTextArea > div > div, 
     .stDateInput > div > div, .stNumberInput > div > div {
         background-color: #FFFFFF !important; color: #000000 !important; border: 1px solid #D3D3D3;
     }
-
-    /* Чорний шрифт для тексту, який вводить користувач */
     input, textarea { color: #000000 !important; }
-
-    /* Чорний текст для всіх таблиць та звітів */
     [data-testid="stDataFrame"], [data-testid="stTable"] { color: #000000 !important; }
-
-    /* Заголовки Expander-ів у світлому режимі робимо сірими */
     .streamlit-expanderHeader { background-color: #F0F2F6 !important; color: #000000 !important; }
-
-    /* Чорний текст для кнопок */
     button { color: #000000 !important; }
 </style>
 """
+
+if st.session_state.theme == 'dark':
+    st.markdown(dark_css, unsafe_allow_html=True)
+else:
+    st.markdown(light_css, unsafe_allow_html=True)
 
 # Застосовуємо обраний стиль залежно від стану в session_state
 if st.session_state.theme == 'dark':
@@ -102,7 +67,6 @@ else:
 
 
 # --- КОНСТАНТИ ТА ПРАВА ДОСТУПУ ---
-# Списки ролей, які використовуються для перевірки прав (наприклад, доступ до адмін-панелі)
 ROLES_LIST = ["dean", "admin"]
 TEACHER_LEVEL = ['dean', 'admin']
 DEAN_LEVEL = ['dean', 'admin']
@@ -223,25 +187,18 @@ def convert_df_to_csv(df):
     return df.to_csv(index=False).encode('utf-8-sig')
 
 def make_hashes(password):
-    # Хешування паролів: ми не зберігаємо паролі у відкритому вигляді.
-    # Алгоритм SHA-256 перетворює пароль на унікальний рядок символів.
     return hashlib.sha256(str.encode(password)).hexdigest()
 
 def check_hashes(password, hashed_text):
-    # Перевірка пароля: хешуємо введений пароль і порівнюємо з тим, що в базі
     if make_hashes(password) == hashed_text: return True
     return False
 
 def create_connection():
-    # Створюємо з'єднання з файлом бази даних SQLite. 
-    # check_same_thread=False дозволяє Streamlit працювати з базою в багатопоточному режимі.
     return sqlite3.connect('university_v22.db', check_same_thread=False)
 
 def init_db():
-    # Головна функція ініціалізації: створює всі необхідні таблиці, якщо їх ще немає.
     conn = create_connection()
     c = conn.cursor()
-    # Створюємо таблиці: користувачі, студенти, розклад, оцінки, відвідуваність тощо.
     c.execute('''CREATE TABLE IF NOT EXISTS users(username TEXT PRIMARY KEY, password TEXT, role TEXT, full_name TEXT, group_link TEXT)''')
     c.execute('''CREATE TABLE IF NOT EXISTS students(id INTEGER PRIMARY KEY AUTOINCREMENT, full_name TEXT, group_name TEXT)''')
     c.execute('''CREATE TABLE IF NOT EXISTS schedule(id INTEGER PRIMARY KEY AUTOINCREMENT, group_name TEXT, day TEXT, time TEXT, subject TEXT, teacher TEXT)''')
@@ -255,8 +212,6 @@ def init_db():
     c.execute('''CREATE TABLE IF NOT EXISTS system_logs(id INTEGER PRIMARY KEY AUTOINCREMENT, user TEXT, action TEXT, details TEXT, timestamp TEXT)''')
     
     # --- ТАБЛИЦІ ДЛЯ АНКЕТИ ТА КОНТРАКТІВ ---
-    # Таблиця для детальної інформації про навчання студента (Електронна анкета)
-    # student_name тут є PRIMARY KEY, тобто один студент має лише один запис.
     c.execute('''CREATE TABLE IF NOT EXISTS student_education_info(
         student_name TEXT PRIMARY KEY,
         status TEXT, study_form TEXT, course INTEGER, is_contract TEXT,
@@ -269,7 +224,6 @@ def init_db():
         curator TEXT, last_modified TEXT
     )''')
     
-    # Таблиця для обліку попередньої освіти (звідки прийшов студент)
     c.execute('''CREATE TABLE IF NOT EXISTS student_prev_education(
         student_name TEXT PRIMARY KEY,
         institution_name TEXT, institution_type TEXT,
@@ -278,7 +232,6 @@ def init_db():
         last_modified TEXT
     )''')
 
-    # Реєстр академічних довідок (для тих, хто перевівся з інших університетів)
     c.execute('''CREATE TABLE IF NOT EXISTS academic_certificates(
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         student_name TEXT, cert_number TEXT, issue_date TEXT,
@@ -286,7 +239,6 @@ def init_db():
         added_by TEXT, added_date TEXT
     )''')
 
-    # Таблиця для індивідуальних відомостей (академрізниця, перездачі, індивідуальний графік)
     c.execute('''CREATE TABLE IF NOT EXISTS individual_statements(
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         student_name TEXT, subject TEXT, statement_type TEXT,
@@ -294,7 +246,6 @@ def init_db():
         created_by TEXT
     )''')
 
-    # Таблиця для фінансового обліку (контрактна форма навчання)
     c.execute('''CREATE TABLE IF NOT EXISTS student_contracts(
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         student_name TEXT,
@@ -308,7 +259,6 @@ def init_db():
     )''')
 
     # --- НОВА ТАБЛИЦЯ: ЕКЗАМЕНАЦІЙНІ ВІДОМОСТІ (СЕСІЯ) ---
-    # Використовується для організації сесійного контролю
     c.execute('''CREATE TABLE IF NOT EXISTS exam_sheets(
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         sheet_number TEXT,
@@ -322,20 +272,17 @@ def init_db():
 
     conn.commit()
 
-    # Початкове наповнення: якщо таблиця студентів порожня, додаємо адміна та дані з GROUPS_DATA
     c.execute('SELECT count(*) FROM students')
     if c.fetchone()[0] == 0:
         c.execute('INSERT OR IGNORE INTO users VALUES (?,?,?,?,?)', ('admin', make_hashes('admin'), 'admin', 'Головний Адміністратор', ''))
-        # Цикл проходить по словнику GROUPS_DATA і записує кожного студента в базу
         for group, names in GROUPS_DATA.items():
             for name in names:
-                clean_name = name.lstrip("0123456789. ") # Очищення від зайвих цифр у списку
+                clean_name = name.lstrip("0123456789. ") 
                 c.execute('INSERT INTO students (full_name, group_name) VALUES (?,?)', (clean_name, group))
         conn.commit()
     return conn
 
 def log_action(user, action, details):
-    # Функція аудиту: записує кожну важливу дію (вхід, зміна оцінки) у таблицю системних логів
     conn = create_connection()
     ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     conn.execute("INSERT INTO system_logs (user, action, details, timestamp) VALUES (?,?,?,?)", (user, action, details, ts))
@@ -344,7 +291,6 @@ def log_action(user, action, details):
 def convert_df_to_csv(df):
     return df.to_csv(index=False).encode('utf-8-sig')
 
-# Ініціалізація контролера кук
 controller = CookieController()
 
 def perform_login(user):
@@ -354,7 +300,6 @@ def perform_login(user):
     st.session_state['full_name'] = user[3]
     st.session_state['group'] = user[4]
     
-    # ЗБЕРІГАЄМО КУКУ: Система запам'ятовує ідентифікатор користувача в браузері на 30 днів
     controller.set('user_fingerprint', user[0]) 
     
     log_action(user[3], "Login", f"Вхід у систему: {user[2]}")
@@ -376,7 +321,6 @@ def login_register_page():
             st.session_state['saved_accounts'] = []
 
     # 2. ЛОГІКА "АВТОМАТИЧНЕ ВПІЗНАННЯ" ЧЕРЕЗ COOKIE
-    # Перевіряємо наявність токена в браузері перед відображенням форми
     saved_token = controller.get('user_fingerprint')
     if saved_token and not st.session_state.get('logged_in'):
         conn = create_connection()
@@ -387,7 +331,7 @@ def login_register_page():
             st.info(f"👋 Система впізнала ваш пристрій як: **{user[3]}**")
             if st.button("Увійти автоматично (я забув пароль)"):
                 perform_login(user)
-                return # Перериваємо функцію, щоб не показувати решту інтерфейсу
+                return 
 
     # 3. ОСНОВНИЙ ІНТЕРФЕЙС (Радіо-кнопки)
     action = st.radio("Оберіть дію:", ["Вхід", "Реєстрація", "Швидкий вхід"], horizontal=True)
@@ -422,7 +366,6 @@ def login_register_page():
             user = c.fetchone()
             
             if user:
-                # Додаємо в список швидкого входу, якщо обрано чекбокс
                 if remember_me and (username not in st.session_state['saved_accounts']):
                     st.session_state['saved_accounts'].append(username)
                 perform_login(user)
@@ -444,16 +387,13 @@ def login_register_page():
                               (new_user, make_hashes(new_pass), role, full_name, "Staff/Admin"))
                     conn.commit()
                     
-                    # Встановлюємо Cookie в браузері
                     controller.set('user_fingerprint', new_user)
                     
-                    # Оновлюємо список акаунтів у поточному стані сесії
                     if new_user not in st.session_state['saved_accounts']:
                         st.session_state['saved_accounts'].append(new_user)
                     
                     st.success("Обліковий запис створено! Ваш браузер запам'ятав вас.")
                     
-                    # Автоматично входимо після реєстрації
                     c.execute('SELECT * FROM users WHERE username=?', (new_user,))
                     perform_login(c.fetchone())
                 except sqlite3.IntegrityError:
@@ -462,12 +402,10 @@ def login_register_page():
                 st.warning("Будь ласка, заповніть усі поля.")
 
 def main_panel():
-    # Головна дашборд-панель з візуалізацією статистики
     st.title("🏠 Головна панель")
     st.markdown(f"### Вітаємо, {st.session_state['full_name']}!")
     conn = create_connection()
 
-    # Використовуємо метрики (KPI) для швидкого перегляду кількості студентів та середнього балу
     st.divider()
     st.subheader("📊 Аналітика та Статистика")
     kpi1, kpi2, kpi3 = st.columns(3)
@@ -480,7 +418,6 @@ def main_panel():
         total_students = pd.read_sql_query("SELECT count(*) FROM students", conn).iloc[0,0]
         kpi1.metric("Всього студентів", total_students)
 
-    # Візуалізація через Altair: будуємо графік успішності (стовпчикова діаграма)
     file_count = pd.read_sql_query("SELECT count(*) FROM file_storage", conn).iloc[0,0]
     kpi2.metric("Завантажено матеріалів", file_count)
 
@@ -628,7 +565,7 @@ def teachers_view():
     tab_add, tab_import, tab_delete = st.tabs(["➕ Додати", "📥 Імпорт", "🗑️ Видалити"])
 
     with tab_add:
-        with st.container(border=True): # Створює білу картку як на фото
+        with st.container(border=True): 
             new_pib = st.text_input("ПІБ", placeholder="Прізвище Ім'я По батькові")
             target_dept = st.selectbox("Кафедра", list(st.session_state.teachers_data.keys()))
             if st.button("Додати", type="secondary"):
@@ -678,10 +615,8 @@ def schedule_view():
     st.title("📅 Розклад")
     conn = create_connection()
     
-    # Вибір групи
     grp = st.selectbox("Група", list(GROUPS_DATA.keys()))
     
-    # Завантаження існуючих даних
     df = pd.read_sql_query(f"SELECT day, time, subject, teacher FROM schedule WHERE group_name='{grp}'", conn)
     
     if not df.empty:
@@ -689,11 +624,9 @@ def schedule_view():
         st.subheader("📤 Експорт")
         c1, c2 = st.columns(2)
         
-        # CSV Експорт
         csv = df.to_csv(index=False).encode('utf-8-sig')
         c1.download_button("⬇️ Завантажити CSV", csv, f"schedule_{grp}.csv", "text/csv")
         
-        # Excel Експорт
         towrite = io.BytesIO()
         df.to_excel(towrite, index=False, engine='xlsxwriter')
         towrite.seek(0)
@@ -728,7 +661,7 @@ def schedule_view():
 
         st.divider()
 
-        # --- РУЧНЕ ДОДАВАННЯ (Ваша форма) ---
+        # --- РУЧНЕ ДОДАВАННЯ ---
         with st.form("sch"):
             st.write("📝 Додати запис вручну")
             d = st.selectbox("День", ["Понеділок", "Вівторок", "Середа", "Четвер", "П'ятниця"])
@@ -758,7 +691,7 @@ def documents_view():
     
     tabs = st.tabs(tabs_list)
 
-    # --- Вкладка 0: Реєстр ---
+    # --- Вкладка 1: Реєстр ---
     with tabs[0]:
         st.subheader("Історія документів")
         if st.session_state['role'] in ['student', 'starosta']:
@@ -778,7 +711,7 @@ def documents_view():
         except Exception as e:
             st.error(f"Помилка завантаження даних: {e}")
 
-    # --- Вкладка 1: Створити ---
+    # --- Вкладка 2: Створити ---
     with tabs[1]:
         st.subheader("Подання нового запиту")
         with st.form("doc_create"):
@@ -801,7 +734,7 @@ def documents_view():
                 st.success("Запит успішно надіслано!")
                 st.rerun()
 
-    # --- Вкладка 2: Обробка (Тут була головна помилка IndexError) ---
+    # --- Вкладка 3: Обробка ---
     if show_admin:
         with tabs[2]: # Змінено з tabs[3] на tabs[2]
             st.subheader("⚙️ Обробка запитів студентів")
@@ -877,13 +810,10 @@ def gradebook_view():
     conn = create_connection()
     c = conn.cursor()
 
-    # СТУДЕНТ ТА СТАРОСТА ТІЛЬКИ ЧИТАЮТЬ СВОЇ ОЦІНКИ
-    # Логіка відображення: Студенти бачать список, викладачі - інтерактивну таблицю
     if st.session_state['role'] in ['student', 'starosta']:
         df = pd.read_sql(f"SELECT subject, type_of_work, grade, date FROM grades WHERE student_name='{st.session_state['full_name']}'", conn)
         st.dataframe(df, use_container_width=True)
     
-    # ВИКЛАДАЧІ, АДМІНІСТРАТОРИ ТА ТЕХ_АДМІНІСТРАТОРИ
     else:
         t_journal, t_ops = st.tabs(["Журнал", "📥/📤 Операції"])
         
@@ -891,7 +821,6 @@ def gradebook_view():
         c1, c2, c3 = st.columns(3)
         grp = c1.selectbox("Група", list(GROUPS_DATA.keys()))
         
-        # Вибірка студентів для обраної групи
         stds_df = pd.read_sql(f"SELECT full_name FROM students WHERE group_name='{grp}'", conn)
         students_in_group = stds_df['full_name'].tolist() if not stds_df.empty else []
         selected_student = c2.selectbox("Студент", ["Всі студенти"] + students_in_group)
@@ -899,8 +828,6 @@ def gradebook_view():
         subj = c3.selectbox("Предмет", SUBJECTS_LIST)
 
         with t_journal:
-            # Блок додавання колонки доступний всім крім тех_адміна (опціонально)
-            # Якщо тех_адміну теж не можна додавати колонки, можна обгорнути в if
             with st.expander("➕ Додати колонку"):
                 with st.form("new_col"):
                     nm = st.text_input("Назва")
@@ -915,29 +842,23 @@ def gradebook_view():
                         else:
                             st.warning("Перевірте назву або наявність студентів у групі.")
 
-            # Отримання даних для відображення
             query = f"SELECT student_name, type_of_work, grade FROM grades WHERE group_name='{grp}' AND subject='{subj}'"
             if selected_student != "Всі студенти":
                 query += f" AND student_name='{selected_student}'"
 
-            # Для викладачів: створюємо матрицю через pivot_table (Студенти у рядках, Роботи у стовпцях)
             raw = pd.read_sql(query, conn)
 
             # --- ЛОГІКА ВІДОБРАЖЕННЯ ТА РЕДАГУВАННЯ ---
             if not raw.empty:
                 matrix = raw.pivot_table(index='student_name', columns='type_of_work', values='grade', aggfunc='first').fillna(0)
                 
-                # ПЕРЕВІРКА РОЛІ: Технічний адміністратор
                 if st.session_state['role'] == 'tech_admin':
                     st.info("ℹ️ Режим перегляду для Технічного адміністратора. Збереження недоступне.")
                     st.dataframe(matrix, use_container_width=True) # Просто перегляд
                 
-                # ПЕРЕВІРКА РОЛІ: Викладач або Адмін
                 else:
-                    # st.data_editor дозволяє редагувати оцінки прямо в таблиці інтерфейсу
                     edited = st.data_editor(matrix, use_container_width=True)
                     if st.button("Зберегти зміни"):
-                        # При натисканні кнопки проходимо циклом по всіх змінених клітинках і робимо SQL UPDATE
                         for s_name, row in edited.iterrows():
                             for w_name, val in row.items():
                                 c.execute("UPDATE grades SET grade=? WHERE student_name=? AND subject=? AND type_of_work=?", 
@@ -964,7 +885,6 @@ def gradebook_view():
             except Exception:
                 col_ex2.info("Excel тимчасово недоступний (використовуйте CSV)")
 
-            # Імпорт
             st.divider()
             st.subheader("📥 Імпорт")
             up_file = st.file_uploader("Оберіть файл (CSV або XLSX)", type=["csv", "xlsx"])
@@ -983,9 +903,6 @@ import pandas as pd
 import streamlit as st
 
 def attendance_view():
-    # Модуль відвідуваності: аналогічно журналу будує матрицю через pivot_table,
-    # але замість балів використовує статуси ("н", "присутній").
-    # Включає функцію фільтрації "прогульників" через слайдер (n_filter).
     st.title("📝 Журнал Відвідуваності")
     conn = create_connection()
     
@@ -1005,7 +922,7 @@ def attendance_view():
         grp = c1.selectbox("Група", list(GROUPS_DATA.keys()), key="att_grp")
         subj = c2.selectbox("Предмет", SUBJECTS_LIST, key="att_sbj")
         
-        # --- БЛОК ДОДАВАННЯ ТА ІМПОРТУ (Верхня панель) ---
+        # --- БЛОК ДОДАВАННЯ ТА ІМПОРТУ ---
         col_add, col_imp = st.columns(2)
         
         with col_add:
@@ -1013,13 +930,11 @@ def attendance_view():
                 with st.form("new_att_col"):
                     col_name = st.text_input("Назва дати (напр. 25.12)")
                     
-                    # Отримуємо список студентів обраної групи
                     stds_in_grp = pd.read_sql(
                         f"SELECT full_name FROM students WHERE group_name='{grp}'", 
                         conn
                     )['full_name'].tolist()
                     
-                    # Вибір: всі студенти або один конкретний
                     student_selection = st.selectbox(
                         "Для кого додати:",
                         ["Усі студенти"] + stds_in_grp
@@ -1032,11 +947,9 @@ def attendance_view():
                     
                     if st.form_submit_button("Створити"):
                         if col_name:
-                            # Визначаємо цільовий список студентів
                             targets = stds_in_grp if student_selection == "Усі студенти" else [student_selection]
                             
                             for s in targets:
-                                # Перевірка на дублікати, щоб не створювати одну й ту саму дату двічі
                                 exists = conn.execute(
                                     "SELECT id FROM attendance WHERE student_name=? AND subject=? AND date_column=?", 
                                     (s, subj, col_name)
@@ -1062,7 +975,6 @@ def attendance_view():
                         for s_name, row in imp_df.iterrows():
                             for d_col, val in row.items():
                                 val = str(val) if pd.notna(val) else ""
-                                # Перевірка існування запису для оновлення або створення
                                 res = conn.execute(
                                     "SELECT id FROM attendance WHERE student_name=? AND subject=? AND date_column=?", 
                                     (s_name, subj, d_col)
@@ -1086,22 +998,18 @@ def attendance_view():
         )
         
         if not raw.empty:
-            # Створення зведеної таблиці (Матриця: Студенти x Дати)
             matrix = raw.pivot_table(index='student_name', columns='date_column', values='status', aggfunc='first').fillna("")
             
             st.divider()
             
-            # Панель аналітики та експорту
             f_col1, f_col2 = st.columns([2,1])
             
             with f_col1:
-                # Рахуємо пропуски "н" (неповажні) для фільтрації
                 missed_counts = (matrix == "н").sum(axis=1)
                 max_misses = int(missed_counts.max()) if not missed_counts.empty else 0
                 n_filter = st.slider("🔍 Фільтр прогульників: Студенти з 'н' >= N:", 0, max_misses, 0)
             
             with f_col2:
-                # Генерація Excel-файлу
                 buffer = io.BytesIO()
                 with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
                     matrix.to_excel(writer, sheet_name='Відвідуваність')
@@ -1115,10 +1023,8 @@ def attendance_view():
                     use_container_width=True
                 )
 
-            # Застосування фільтрації до матриці
             filtered_matrix = matrix[missed_counts >= n_filter]
 
-            # Конфігурація інтерактивних стовпців з випадаючим списком
             column_config = {
                 col: st.column_config.SelectboxColumn(
                     col,
@@ -1130,18 +1036,15 @@ def attendance_view():
             st.write(f"### 📋 Журнал: {grp} — {subj}")
             st.info("💡 Ви можете змінювати статуси прямо в таблиці та натиснути кнопку 'Зберегти' внизу.")
             
-            # Відображення редактора даних
             edited = st.data_editor(
                 filtered_matrix, 
                 column_config=column_config,
                 use_container_width=True
             )
             
-            # Кнопка збереження змін у БД
             if st.button("💾 Зберегти зміни у журналі"):
                 for s_name, row in edited.iterrows():
                     for d_col, val in row.items():
-                        # Знаходимо конкретний ID рядка в БД для точного оновлення
                         db_res = conn.execute(
                             "SELECT id FROM attendance WHERE student_name=? AND subject=? AND date_column=?", 
                             (s_name, subj, d_col)
@@ -1183,10 +1086,8 @@ def reports_view():
             st.markdown("#### Експорт відомості")
             ex_c1, ex_c2, ex_c3 = st.columns(3)
             
-            # CSV
             ex_c1.download_button("⬇️ CSV", matrix.to_csv().encode('utf-8-sig'), f"vidomist_{grp}_{subj}.csv", "text/csv")
             
-            # Excel
             try:
                 buf = io.BytesIO()
                 with pd.ExcelWriter(buf, engine='xlsxwriter') as writer:
@@ -1206,7 +1107,6 @@ def reports_view():
         if not all_students.empty:
             selected_student = st.selectbox("Оберіть студента", all_students['full_name'].tolist())
             
-            # Додаємо можливість експорту повної анкети
             if st.button("📤 Експортувати всі дані студента (JSON)"):
                 student_full_data = {
                     "main": pd.read_sql(f"SELECT * FROM students WHERE full_name='{selected_student}'", conn).to_dict('records'),
@@ -1218,8 +1118,6 @@ def reports_view():
 
             tab_main, tab_edu, tab_prev_edu, tab_grades = st.tabs(["Загальна", "Навчання (Поточне)", "Освіта (До вступу)", "Успішність"])
             
-            # ... (Ваш існуючий код для tab_main, tab_edu, tab_prev_edu залишається без змін) ...
-            # [Тут логіка збереження форм, яку ви надали]
 
             with tab_grades:
                 grades = pd.read_sql(f"SELECT subject, type_of_work, grade, date FROM grades WHERE student_name='{selected_student}'", conn)
@@ -1232,7 +1130,6 @@ def reports_view():
     with t3:
         st.subheader("Генератор Зведеної Відомості")
         
-        # Отримуємо список груп безпосередньо з бази даних, щоб уникнути розбіжностей
         try:
             db_groups = pd.read_sql("SELECT DISTINCT group_name FROM students", conn)['group_name'].tolist()
         except:
@@ -1252,7 +1149,6 @@ def reports_view():
                 except Exception as e:
                     st.error(f"Помилка імпорту: {e}")
 
-        # Безпечне отримання списку предметів саме для цієї групи
         try:
             available_subjects_query = f"SELECT DISTINCT subject FROM grades WHERE group_name='{grp_sum}'"
             available_subjects = pd.read_sql(available_subjects_query, conn)['subject'].tolist()
@@ -1279,10 +1175,8 @@ def reports_view():
                     data = pd.read_sql(query, conn, params=params)
                     
                     if not data.empty:
-                        # Формуємо матрицю
                         summary_matrix = data.pivot_table(index='student_name', columns='subject', values='final_grade').fillna(0).round(0).astype(int)
                         
-                        # Додаємо студентів, у яких немає оцінок (щоб список був повним)
                         all_students_df = pd.read_sql("SELECT full_name FROM students WHERE group_name=?", conn, params=[grp_sum])
                         summary_matrix = all_students_df.merge(summary_matrix, left_on='full_name', right_index=True, how='left').fillna(0)
                         summary_matrix.set_index('full_name', inplace=True)
@@ -1290,7 +1184,6 @@ def reports_view():
                         st.success(f"Згенеровано відомість для групи {grp_sum}")
                         st.dataframe(summary_matrix, use_container_width=True)
                         
-                        # Експорт
                         c_sum1, c_sum2 = st.columns(2)
                         csv_out = summary_matrix.to_csv().encode('utf-8-sig')
                         c_sum1.download_button("⬇️ Експорт CSV", csv_out, f"zvedena_{grp_sum}.csv")
@@ -1581,7 +1474,6 @@ def session_module_view():
             
             st.markdown(f"**Група:** {curr_group} | **Предмет:** {curr_subj} | **Тип:** {curr_type}")
             
-            # Підготовка списку студентів та існуючих оцінок
             students_list = pd.read_sql(f"SELECT full_name FROM students WHERE group_name='{curr_group}'", conn)['full_name'].tolist()
             existing_grades = pd.read_sql(f"""SELECT student_name, grade FROM grades 
                                               WHERE group_name='{curr_group}' AND subject='{curr_subj}' AND type_of_work='{curr_type}'""", conn)
@@ -1595,37 +1487,37 @@ def session_module_view():
             df_grading = pd.DataFrame(data)
             st.write("Проставте оцінки у таблиці нижче:")
 
-            # --- ПЕРЕВІРКА РОЛІ ТЕХНІЧНОГО АДМІНІСТРАТОРА ---
-            if st.session_state['role'] == 'tech_admin':
-                st.warning("⚠️ У вас є права на перегляд відомостей, але редагування заблоковано.")
-                st.dataframe(df_grading, use_container_width=True)
-            else:
-                edited_grades = st.data_editor(df_grading, use_container_width=True, key="editor_exam")
-                
-                if st.button("💾 Зберегти оцінки в БД", key="save_exam_grades"):
-                    date_now = str(datetime.now().date())
-                    count_updated = 0
-                    
-                    for index, row in edited_grades.iterrows():
-                        s_name = row['Студент']
-                        s_grade = row['Оцінка']
-                        
-                        check = c.execute("""SELECT id FROM grades WHERE student_name=? AND subject=? AND type_of_work=?""", 
-                                         (s_name, curr_subj, curr_type)).fetchone()
-                        
-                        if check:
-                            c.execute("UPDATE grades SET grade=?, date=? WHERE id=?", (s_grade, date_now, check[0]))
-                        else:
-                            c.execute("""INSERT INTO grades (student_name, group_name, subject, type_of_work, grade, date)
-                                         VALUES (?,?,?,?,?,?)""", (s_name, curr_group, curr_subj, curr_type, s_grade, date_now))
-                        count_updated += 1
-                    
-                    conn.commit()
-                    st.success(f"Успішно збережено {count_updated} оцінок!")
-                    log_action(st.session_state['full_name'], "Exam Grading", f"Внесено оцінки: {curr_group}, {curr_subj}")
-                    st.rerun()
+edited_grades = st.data_editor(df_grading, use_container_width=True, key="editor_exam")
+
+if st.button("💾 Зберегти оцінки в БД", key="save_exam_grades"):
+    date_now = str(datetime.now().date())
+    count_updated = 0
+    
+    for index, row in edited_grades.iterrows():
+        s_name = row['Студент']
+        s_grade = row['Оцінка']
+        
+        check = c.execute("""
+            SELECT id FROM grades 
+            WHERE student_name=? AND subject=? AND type_of_work=?
+        """, (s_name, curr_subj, curr_type)).fetchone()
+        
+        if check:
+            c.execute("UPDATE grades SET grade=?, date=? WHERE id=?", (s_grade, date_now, check[0]))
         else:
-            st.warning("Немає відкритих відомостей. Створіть нову у вкладці 'Відомості'.")
+            c.execute("""
+                INSERT INTO grades (student_name, group_name, subject, type_of_work, grade, date)
+                VALUES (?,?,?,?,?,?)
+            """, (s_name, curr_group, curr_subj, curr_type, s_grade, date_now))
+        
+        count_updated += 1
+    
+    conn.commit()
+    
+    st.success(f"Успішно збережено {count_updated} оцінок!")
+    log_action(st.session_state['full_name'], "Exam Grading", f"Внесено оцінки: {curr_group}, {curr_subj}")
+    
+    st.rerun()
 
     # --- ВКЛАДКА 3: РУХ КОНТИНГЕНТУ ---
     with tab_movement:
@@ -1733,10 +1625,8 @@ def system_settings_view():
 
 
 def main():
-    # 1. Ініціалізація бази даних при запуску
     init_db()
     
-    # 2. Перевірка наявності ключа авторизації в пам'яті сесії
     if 'logged_in' not in st.session_state:
         st.session_state['logged_in'] = False
 
@@ -1747,7 +1637,6 @@ def main():
         # --- БОКОВА ПАНЕЛЬ (SIDEBAR) ---
         st.sidebar.title(f"👤 {st.session_state.get('full_name', 'Користувач')}")
         
-        # Відображення ролі для візуального контролю
         current_role = st.session_state.get('role', '').lower()
         if current_role == 'student':
              st.sidebar.markdown("### 🛡️ СТУДЕНТ (READ ONLY)")
@@ -1758,7 +1647,6 @@ def main():
         else:
              st.sidebar.caption(f"Роль: {current_role.upper()}")
         
-        # Кнопка зміни теми
         if st.sidebar.button("Перемкнути тему 🌓"):
             toggle_theme()
             st.rerun()
@@ -1766,7 +1654,6 @@ def main():
         st.sidebar.divider()
         
         # --- НАЛАШТУВАННЯ МЕНЮ НАВІГАЦІЇ ---
-        # Спершу створюємо базові пункти, доступні всім авторизованим
         menu_options = {
             "Головна панель": main_panel,
             "Студенти та Групи": students_groups_view,
@@ -1779,7 +1666,6 @@ def main():
             "Файловий репозиторій": file_repository_view
         }
         
-        # Додаємо спецмодулі залежно від прав доступу
         if current_role in DEAN_LEVEL:
             menu_options["Модулі Деканату"] = deanery_modules_view
             menu_options["Сесія та Рух"] = session_module_view 
@@ -1787,19 +1673,15 @@ def main():
         if current_role == 'admin':
             menu_options["Системні налаштування"] = system_settings_view
 
-        # Відображення радіокнопок вибору сторінки
         selection = st.sidebar.radio("Навігація", list(menu_options.keys()))
         
-        # Виклик функції обраної сторінки
         menu_options[selection]()
         
         st.sidebar.divider()
         
-        # Кнопка виходу
         if st.sidebar.button("Вийти 🚪"):
             st.session_state['logged_in'] = False
             st.rerun()
 
-# Точка входу в програму
 if __name__ == '__main__':
     main()
