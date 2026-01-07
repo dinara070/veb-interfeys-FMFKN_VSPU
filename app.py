@@ -355,6 +355,7 @@ def login_register_page():
         else:
             st.warning("Немає збережених акаунтів.")
 
+
     # --- ЗВИЧАЙНИЙ ВХІД ---
     elif action == "Вхід":
         username = st.text_input("Логін")
@@ -362,15 +363,20 @@ def login_register_page():
         remember_me = st.checkbox("Запам'ятати мене на цьому пристрої")
         
         if st.button("Увійти"):
-            c.execute('SELECT * FROM users WHERE username=? AND password=?', (username, make_hashes(password)))
+            # Хешуємо введений пароль, щоб порівняти з тим, що в базі
+            hashed_input = make_hashes(password)
+            c.execute('SELECT * FROM users WHERE username=? AND password=?', (username, hashed_input))
             user = c.fetchone()
             
             if user:
-                if remember_me and (username not in st.session_state['saved_accounts']):
-                    st.session_state['saved_accounts'].append(username)
+                if remember_me:
+                    # Зберігаємо логін в кукі, щоб система впізнала пристрій пізніше
+                    controller.set('user_fingerprint', username)
+                    if username not in st.session_state['saved_accounts']:
+                        st.session_state['saved_accounts'].append(username)
                 perform_login(user)
             else:
-                st.error("Невірний логін або пароль")
+                st.error("Невірний логін або пароль. Перевірте мову розкладки та CapsLock.")
 
     # --- РЕЄСТРАЦІЯ ---
     elif action == "Реєстрація":
@@ -382,22 +388,20 @@ def login_register_page():
 
         if st.button("Зареєструватися"):
             if new_user and new_pass and full_name:
+                # Хешуємо пароль перед збереженням!
+                hashed_password = make_hashes(new_pass)
                 try:
-                    c.execute('INSERT INTO users VALUES (?,?,?,?,?)', 
-                              (new_user, make_hashes(new_pass), role, full_name, "Staff/Admin"))
+                    # Додаємо в базу
+                    c.execute('INSERT INTO users (username, password, role, full_name, group_link) VALUES (?,?,?,?,?)', 
+                              (new_user, hashed_password, role, full_name, "Staff/Admin"))
                     conn.commit()
                     
+                    # Відразу запам'ятовуємо користувача
                     controller.set('user_fingerprint', new_user)
-                    
-                    if new_user not in st.session_state['saved_accounts']:
-                        st.session_state['saved_accounts'].append(new_user)
-                    
-                    st.success("Обліковий запис створено! Ваш браузер запам'ятав вас.")
-                    
-                    c.execute('SELECT * FROM users WHERE username=?', (new_user,))
-                    perform_login(c.fetchone())
+                    st.success("Обліковий запис створено! Тепер ви можете увійти.")
+                    st.balloons()
                 except sqlite3.IntegrityError:
-                    st.error("Цей логін вже зайнятий.")
+                    st.error("Цей логін вже зайнятий. Оберіть інший.")
             else:
                 st.warning("Будь ласка, заповніть усі поля.")
 
