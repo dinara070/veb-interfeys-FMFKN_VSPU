@@ -11,123 +11,75 @@ import re
 # Ініціалізація контролера кукі
 controller = CookieController()
 
-# --- КОНФІГУРАЦІЯ ТА ПОСИЛАННЯ ---
-# ВСТАВТЕ ВАШЕ ПОСИЛАННЯ СЮДИ
+# --- КОНФІГУРАЦІЯ ---
 SPREADSHEET_URL = "https://docs.google.com/spreadsheets/d/1PRSI150082txAU7fjscbdTvlUtSTj1t5nonYpdEPWQk/edit?usp=sharing"
 
 st.set_page_config(page_title="ФМФКН - Деканат (Cloud)", layout="wide", page_icon="🎓")
 
-# --- НОВІ ФУНКЦІЇ ДЛЯ GOOGLE SHEETS ---
+# --- РОБОТА З GOOGLE SHEETS ---
 
 def get_connection():
-    """Створює підключення до Google Sheets"""
     return st.connection("gsheets", type=GSheetsConnection)
 
 def read_sheet(sheet_name):
-    """Читає конкретний аркуш таблиці"""
-    conn = get_connection()
-    return conn.read(spreadsheet=SPREADSHEET_URL, worksheet=sheet_name, ttl=0)
+    """Читає аркуш, повертає пустий DF, якщо виникла помилка або аркуш порожній"""
+    try:
+        conn = get_connection()
+        df = conn.read(spreadsheet=SPREADSHEET_URL, worksheet=sheet_name, ttl=0)
+        return df.dropna(how='all')
+    except Exception:
+        return pd.DataFrame()
 
-def update_sheet(sheet_name, df):
-    """Оновлює аркуш повністю новими даними"""
+def save_sheet(sheet_name, df):
+    """Повністю перезаписує аркуш"""
     conn = get_connection()
     conn.update(spreadsheet=SPREADSHEET_URL, worksheet=sheet_name, data=df)
 
-def append_to_sheet(sheet_name, new_row_dict):
-    """Додає один рядок у кінець аркуша"""
+def append_row(sheet_name, new_row_dict):
+    """Додає рядок у Google Sheets"""
     df = read_sheet(sheet_name)
     new_df = pd.concat([df, pd.DataFrame([new_row_dict])], ignore_index=True)
-    update_sheet(sheet_name, new_df)
+    save_sheet(sheet_name, new_df)
 
-# --- БЕЗПЕКА ТА АВТОРИЗАЦІЯ (Cloud Version) ---
+# --- БЕЗПЕКА ---
 
 def make_hashes(password):
-    """Шифрування пароля"""
     return hashlib.sha256(str.encode(password)).hexdigest()
 
-def check_hashes(password, hashed_text):
-    """Перевірка пароля"""
-    return make_hashes(password) == hashed_text
-
 def log_action(user_name, action, details):
-    """Логування дій прямо в Google Sheets"""
     ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    # Тепер ми використовуємо нову функцію append_to_sheet замість SQL INSERT
-    append_to_sheet("system_logs", {
+    append_row("system_logs", {
         "user": user_name, 
         "action": action, 
         "details": details, 
         "timestamp": ts
     })
 
-def perform_login(user):
-    """Авторизація та збереження даних (замість SQLite використовуємо Sheets лог)"""
+def perform_login(user_row):
+    """Приймає рядок з DataFrame (Series)"""
     st.session_state['logged_in'] = True
-    st.session_state['username'] = user['username']
-    st.session_state['role'] = user['role']
-    st.session_state['full_name'] = user['full_name']
-    st.session_state['group'] = user['group_link']
+    st.session_state['username'] = user_row['username']
+    st.session_state['role'] = user_row['role']
+    st.session_state['full_name'] = user_row['full_name']
+    st.session_state['group'] = user_row['group_link']
     
-    # Зберігаємо логін у кукі браузера
-    controller.set('remember_user', user['username']) 
-    
-    # Логування входу в таблицю system_logs у Google Sheets
-    log_action(user['full_name'], "Login", "Вхід у систему (Cloud)")
-    
-    st.success(f"Вітаємо, {user['full_name']}!")
+    controller.set('remember_user', user_row['username']) 
+    log_action(user_row['full_name'], "Login", "Вхід у хмарну систему")
+    st.success(f"Вітаємо, {user_row['full_name']}!")
     st.rerun()
     
-# --- ЛОГІКА ТЕМИ ТА СТИЛІЗАЦІЯ ---
-
-# Ініціалізація теми у стані сесії
+# --- ТЕМА ---
 if 'theme' not in st.session_state:
     st.session_state.theme = 'light'
 
 def toggle_theme():
-    """Функція для зміни теми"""
     st.session_state.theme = 'dark' if st.session_state.theme == 'light' else 'light'
 
-# ПОВНІ НАЛАШТУВАННЯ ТЕМНОЇ ТЕМИ
-dark_css = """
-<style>
-    .stApp { background-color: #0E1117; color: #FFFFFF; }
-    [data-testid="stSidebar"] { background-color: #262730; }
-    h1, h2, h3, h4, h5, h6, p, li, span, label, .stMarkdown { color: #FFFFFF !important; }
-    .stTextInput > div > div, .stSelectbox > div > div, .stTextArea > div > div, 
-    .stDateInput > div > div, .stNumberInput > div > div {
-        background-color: #41444C !important; color: #FFFFFF !important;
-    }
-    input, textarea { color: #FFFFFF !important; }
-    [data-testid="stDataFrame"], [data-testid="stTable"] { color: #FFFFFF !important; }
-    .streamlit-expanderHeader { background-color: #262730 !important; color: #FFFFFF !important; }
-    button { color: #FFFFFF !important; }
-</style>
-"""
+dark_css = "<style>.stApp { background-color: #0E1117; color: #FFFFFF; }</style>"
+light_css = "<style>.stApp { background-color: #FFFFFF; color: #000000; }</style>"
+st.markdown(dark_css if st.session_state.theme == 'dark' else light_css, unsafe_allow_html=True)
 
-# ПОВНІ НАЛАШТУВАННЯ СВІТЛОЇ ТЕМИ
-light_css = """
-<style>
-    .stApp { background-color: #FFFFFF; color: #000000; }
-    [data-testid="stSidebar"] { background-color: #F0F2F6; }
-    h1, h2, h3, h4, h5, h6, p, li, span, label, .stMarkdown { color: #000000 !important; }
-    .stTextInput > div > div, .stSelectbox > div > div, .stTextArea > div > div, 
-    .stDateInput > div > div, .stNumberInput > div > div {
-        background-color: #FFFFFF !important; color: #000000 !important; border: 1px solid #D3D3D3;
-    }
-    input, textarea { color: #000000 !important; }
-    [data-testid="stDataFrame"], [data-testid="stTable"] { color: #000000 !important; }
-    .streamlit-expanderHeader { background-color: #F0F2F6 !important; color: #000000 !important; }
-    button { color: #000000 !important; }
-</style>
-"""
-
-# Автоматичне застосування обраного стилю при кожному оновленні сторінки
-if st.session_state.theme == 'dark':
-    st.markdown(dark_css, unsafe_allow_html=True)
-else:
-    st.markdown(light_css, unsafe_allow_html=True)
-
-# --- КОНСТАНТИ ТА ПРАВА ДОСТУПУ ---
+# --- КОНСТАНТИ ---
 ROLES_LIST = ["dean", "admin"]
 TEACHER_LEVEL = ['dean', 'admin']
 DEAN_LEVEL = ['dean', 'admin']
