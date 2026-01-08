@@ -857,7 +857,7 @@ import io
 import streamlit as st
 
 def gradebook_view():
-    st.title("💯 Журнал Оцінок (Google Sheets)")
+    st.title("💯 Електронний журнал (Google Sheets)")
     
     # Завантажуємо дані
     grades_df = read_sheet("grades")
@@ -867,8 +867,8 @@ def gradebook_view():
         st.error("База студентів порожня. Додайте студентів у відповідній вкладці.")
         return
 
-    # --- ЛОГІКА ДЛЯ СТУДЕНТА / СТАРОСТИ ---
-    if st.session_state['role'] in ['student', 'starosta']:
+    # --- ЛОГІКА ДЛЯ СТУДЕНТА / СТАРОСТИ (Тільки перегляд) ---
+    if st.session_state.get('role') in ['student', 'starosta']:
         st.subheader(f"Оцінки студента: {st.session_state['full_name']}")
         if not grades_df.empty:
             user_grades = grades_df[grades_df['student_name'] == st.session_state['full_name']]
@@ -878,76 +878,73 @@ def gradebook_view():
                 st.info("У вас поки немає виставлених оцінок.")
         else:
             st.info("Журнал порожній.")
-    
-    # --- ЛОГІКА ДЛЯ АДМІНІСТРАТОРА / ДЕКАНАТУ ---
+            
+    # --- ЛОГІКА ДЛЯ АДМІНІСТРАТОРА / ВИКЛАДАЧА (Редагування) ---
     else:
-        t_journal, t_ops = st.tabs(["📊 Журнал", "📥/📤 Операції (Імпорт/Експорт)"])
+        t_journal, t_ops = st.tabs(["📊 Редактор журналу", "📥/📤 Імпорт та Експорт"])
         
-        # Фільтри
+        # Загальні фільтри для обох вкладок
         c1, c2, c3 = st.columns(3)
         all_groups = sorted(students_df['group_name'].unique().tolist())
         grp = c1.selectbox("Група", all_groups)
-        
         st_in_grp = students_df[students_df['group_name'] == grp]['full_name'].tolist()
         selected_student = c2.selectbox("Студент", ["Всі студенти"] + st_in_grp)
         subj = c3.selectbox("Предмет", SUBJECTS_LIST)
 
         with t_journal:
-            with st.expander("➕ Додати колонку (тип роботи)"):
-                with st.form("new_col_cloud"):
-                    work_name = st.text_input("Назва (напр. Модуль 1, Лаб 2)")
-                    exam_date = st.date_input("Дата")
-                    if st.form_submit_button("Створити для всієї групи"):
+            # Блок додавання нової колонки (з першого варіанту)
+            with st.expander("➕ Додати нову колонку (Модуль, Лабораторна тощо)"):
+                with st.form("new_col_form"):
+                    work_name = st.text_input("Назва роботи")
+                    work_date = st.date_input("Дата")
+                    if st.form_submit_button("Створити колонку для групи"):
                         if work_name:
                             new_rows = []
                             for s in st_in_grp:
                                 new_rows.append({
                                     "student_name": s, "group_name": grp, "subject": subj,
-                                    "type_of_work": work_name, "grade": 0, "date": str(exam_date)
+                                    "type_of_work": work_name, "grade": 0, "date": str(work_date)
                                 })
-                            # Додаємо нові порожні записи до загального DF
                             updated_grades = pd.concat([grades_df, pd.DataFrame(new_rows)], ignore_index=True)
                             save_sheet("grades", updated_grades)
-                            st.success(f"Колонку '{work_name}' додано!")
+                            st.success(f"Колонку '{work_name}' успішно додано!")
                             st.rerun()
 
-            # Фільтруємо дані для відображення
-            mask = (grades_df['group_name'] == grp) & (grades_df['subject'] == subj)
+            # Основний редактор (з вашого другого варіанту)
+            mask = (grades_df['group_name'] == grp) & (grades_df['subject'] == subj) if not grades_df.empty else pd.Series([False]*len(grades_df))
             if selected_student != "Всі студенти":
                 mask = mask & (grades_df['student_name'] == selected_student)
             
-            raw_filtered = grades_df[mask]
+            raw_filtered = grades_df[mask] if not grades_df.empty else pd.DataFrame()
 
             if not raw_filtered.empty:
-                # Створюємо матрицю для зручного введення
+                # Трансформуємо в матрицю для data_editor
                 matrix = raw_filtered.pivot(index='student_name', columns='type_of_work', values='grade').fillna(0)
-                
                 st.write(f"**Редагування оцінок: {grp} — {subj}**")
                 edited_matrix = st.data_editor(matrix, use_container_width=True)
                 
-                if st.button("💾 Зберегти зміни в Google Sheets"):
-                    # Логіка оновлення: 
-                    # 1. Видаляємо старі записи для цієї групи/предмета
-                    non_target_grades = grades_df[~((grades_df['group_name'] == grp) & (grades_df['subject'] == subj))]
+                if st.button("💾 Зберегти всі зміни в хмару"):
+                    # Логіка розумного оновлення
+                    other_grades = grades_df[~mask] if not grades_df.empty else pd.DataFrame()
                     
-                    # 2. Перетворюємо змінену матрицю назад у довгий список
-                    updated_list = []
+                    new_entries = []
                     for s_name, row in edited_matrix.iterrows():
-                        for w_type, val in row.items():
-                            updated_list.append({
+                        for work_type, val in row.items():
+                            new_entries.append({
                                 "student_name": s_name, "group_name": grp, "subject": subj,
-                                "type_of_work": w_type, "grade": val, "date": str(datetime.now().date())
+                                "type_of_work": work_type, "grade": val, "date": str(datetime.now().date())
                             })
                     
-                    # 3. З'єднуємо і зберігаємо
-                    final_grades = pd.concat([non_target_grades, pd.DataFrame(updated_list)], ignore_index=True)
-                    save_sheet("grades", final_grades)
-                    st.success("Дані успішно синхронізовано з хмарою!")
+                    final_df = pd.concat([other_grades, pd.DataFrame(new_entries)], ignore_index=True)
+                    save_sheet("grades", final_df)
+                    st.success("Дані успішно синхронізовано!")
+                    st.rerun()
             else:
-                st.info("Даних немає. Додайте першу колонку вище.")
+                st.info("Даних для відображення немає. Додайте колонку вище.")
 
         with t_ops:
-            st.subheader("📤 Експорт поточної групи")
+            # Функції експорту та імпорту (з першого варіанту)
+            st.subheader("Вивантаження та завантаження даних")
             if not raw_filtered.empty:
                 c_ex1, c_ex2 = st.columns(2)
                 csv = raw_filtered.to_csv(index=False).encode('utf-8-sig')
@@ -956,65 +953,20 @@ def gradebook_view():
                 buffer = io.BytesIO()
                 with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
                     raw_filtered.to_excel(writer, index=False)
-                c_ex2.download_button("⬇️ Завантажити Excel", buffer.getvalue(), f"grades_{grp}_{subj}.xlsx")
+                c_ex2.download_button("📊 Завантажити Excel", buffer.getvalue(), f"grades_{grp}_{subj}.xlsx")
             
             st.divider()
-            st.subheader("📥 Масовий імпорт")
-            up_file = st.file_uploader("Завантажте файл (має містити всі колонки таблиці grades)", type=["csv", "xlsx"])
+            up_file = st.file_uploader("Масовий імпорт оцінок (CSV/XLSX)", type=["csv", "xlsx"])
             if up_file and st.button("🚀 Запустити імпорт"):
                 try:
                     df_new = pd.read_csv(up_file) if up_file.name.endswith('.csv') else pd.read_excel(up_file)
                     combined = pd.concat([grades_df, df_new], ignore_index=True)
                     save_sheet("grades", combined)
-                    st.success("Імпортовано успішно!")
+                    st.success("Дані імпортовано!")
                     st.rerun()
                 except Exception as e:
-                    st.error(f"Помилка формату: {e}")
-
-def students_view():
-    st.title("👥 Управління контингентом студентів")
-    df_st = read_sheet("students")
-    
-    # Фільтрація для перегляду
-    all_grps = ["Всі"] + (sorted(df_st['group_name'].unique().tolist()) if not df_st.empty else [])
-    sel_grp = st.selectbox("Фільтр списку за групою:", all_grps)
-    
-    display_df = df_st.copy()
-    if sel_grp != "Всі":
-        display_df = display_df[display_df['group_name'] == sel_grp]
-        
-    st.dataframe(display_df, use_container_width=True)
-
-    # Функції адміністрування (лише для Декана/Адміна)
-    if st.session_state['role'] in ['dean', 'admin']:
-        st.divider()
-        st.subheader("🛠️ Інструменти адміністратора")
-        
-        tab_add, tab_del = st.tabs(["➕ Додати", "🗑️ Видалити"])
-        
-        with tab_add:
-            with st.form("add_student_cloud"):
-                c1, c2 = st.columns(2)
-                new_name = c1.text_input("ПІБ студента")
-                new_group = c2.text_input("Група (напр. 1СОМ)")
-                if st.form_submit_button("Зберегти в базу"):
-                    if new_name and new_group:
-                        new_id = int(df_st['id'].max() + 1) if not df_st.empty else 1
-                        append_row("students", {"id": new_id, "full_name": new_name, "group_name": new_group})
-                        log_action(st.session_state['full_name'], "Add Student", f"Додано: {new_name}")
-                        st.success("Студента додано!")
-                        st.rerun()
-        
-        with tab_del:
-            if not df_st.empty:
-                st_to_del = st.selectbox("Оберіть студента для видалення", df_st['full_name'].tolist())
-                if st.button("❌ Видалити остаточно"):
-                    updated_st = df_st[df_st['full_name'] != st_to_del]
-                    save_sheet("students", updated_st)
-                    log_action(st.session_state['full_name'], "Delete Student", f"Видалено: {st_to_del}")
-                    st.warning(f"Студента {st_to_del} видалено")
-                    st.rerun()
-
+                    st.error(f"Помилка: {e}")
+                    
 import io
 import pandas as pd
 import streamlit as st
@@ -1737,63 +1689,78 @@ def system_settings_view():
 
 
 def main():
-    init_db()
-    
+    # 1. Ініціалізація стану сесії
     if 'logged_in' not in st.session_state:
         st.session_state['logged_in'] = False
 
-    # 3. ЛОГІКА ВІДОБРАЖЕННЯ: якщо не зайшли - показуємо вхід, якщо зайшли - робочу панель
+    # 2. Перевірка статусу авторизації
     if not st.session_state['logged_in']:
+        # Показуємо сторінку входу, якщо користувач не зайшов
         login_register_page()
     else:
         # --- БОКОВА ПАНЕЛЬ (SIDEBAR) ---
         st.sidebar.title(f"👤 {st.session_state.get('full_name', 'Користувач')}")
         
+        # Відображення ролі з відповідним стилем
         current_role = st.session_state.get('role', '').lower()
         if current_role == 'student':
-             st.sidebar.markdown("### 🛡️ СТУДЕНТ (READ ONLY)")
-        elif current_role == 'tech_admin':
-             st.sidebar.markdown("### ⚙️ ТЕХНІЧНИЙ АДМІНІСТРАТОР")
+            st.sidebar.markdown("### 🛡️ СТУДЕНТ (READ ONLY)")
         elif current_role == 'teacher':
-             st.sidebar.markdown("### 👨‍🏫 ВИКЛАДАЧ (ACADEMIC)")
+            st.sidebar.markdown("### 👨‍🏫 ВИКЛАДАЧ (ACADEMIC)")
+        elif current_role in DEAN_LEVEL:
+            st.sidebar.markdown(f"### 🏛️ АДМІНІСТРАЦІЯ ({current_role.upper()})")
         else:
-             st.sidebar.caption(f"Роль: {current_role.upper()}")
+            st.sidebar.caption(f"Роль: {current_role.upper()}")
         
-        if st.sidebar.button("Перемкнути тему 🌓"):
+        # Кнопка зміни теми
+        if st.sidebar.button("Змінити тему 🌓", use_container_width=True):
             toggle_theme()
             st.rerun()
             
         st.sidebar.divider()
-        
-        # --- НАЛАШТУВАННЯ МЕНЮ НАВІГАЦІЇ ---
+
+        # 3. НАЛАШТУВАННЯ ДИНАМІЧНОГО МЕНЮ
+        # Базове меню, доступне всім
         menu_options = {
-            "Головна панель": main_panel,
-            "Студенти та Групи": students_groups_view,
-            "Викладачі та Кафедри": teachers_view,
-            "Розклад занять": schedule_view,
-            "Електронний журнал": gradebook_view,
-            "Журнал відвідуваності": attendance_view,
-            "Звіти та Пошук": reports_view,
-            "Документообіг": documents_view,
-            "Файловий репозиторій": file_repository_view
+            "🏠 Головна панель": main_panel,
+            "👥 Студенти та групи": students_groups_view,
+            "👨‍🏫 Викладачі": teachers_view,
+            "📅 Розклад": schedule_view,
+            "💯 Журнал оцінок": gradebook_view,
+            "📝 Відвідуваність": attendance_view,
+            "📂 Документообіг": documents_view,
+            "🗄️ Репозиторій": file_repository_view,
+            "📊 Звіти": reports_view
         }
-        
+
+        # Додавання модулів для Деканату (Admin/Dean)
         if current_role in DEAN_LEVEL:
-            menu_options["Модулі Деканату"] = deanery_modules_view
-            menu_options["Сесія та Рух"] = session_module_view 
-        
+            menu_options["🏛️ Модулі Деканату"] = deanery_modules_view
+            menu_options["📉 Сесія та Рух"] = session_module_view
+
+        # Додавання системних налаштувань лише для Admin
         if current_role == 'admin':
-            menu_options["Системні налаштування"] = system_settings_view
+            menu_options["⚙️ Системні налаштування"] = system_settings_view
 
-        selection = st.sidebar.radio("Навігація", list(menu_options.keys()))
+        # Створення списку для радіо-кнопки (додаємо Вихід у кінець)
+        menu_list = list(menu_options.keys()) + ["🚪 Вийти з системи"]
         
-        menu_options[selection]()
-        
-        st.sidebar.divider()
-        
-        if st.sidebar.button("Вийти 🚪"):
+        # 4. ЛОГІКА НАВІГАЦІЇ
+        choice = st.sidebar.radio("Навігація", menu_list)
+
+        if choice == "🚪 Вийти з системи":
             st.session_state['logged_in'] = False
+            st.session_state['username'] = None
+            st.session_state['role'] = None
             st.rerun()
+        else:
+            # Викликаємо функцію, яка відповідає вибору
+            menu_options[choice]()
 
+        # Футер бічної панелі
+        st.sidebar.divider()
+        st.sidebar.caption("Project Deanery .net v2.0 (Cloud)")
+
+# --- ТОЧКА ВХОДУ ---
 if __name__ == '__main__':
     main()
