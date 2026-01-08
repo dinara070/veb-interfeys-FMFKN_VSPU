@@ -7,6 +7,7 @@ from datetime import datetime
 import io
 import altair as alt
 import re
+import sqlite3
 
 # Ініціалізація контролера кукі
 controller = CookieController()
