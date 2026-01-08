@@ -16,42 +16,47 @@ SPREADSHEET_URL = "https://docs.google.com/spreadsheets/d/1PRSI150082txAU7fjscbd
 
 st.set_page_config(page_title="ФМФКН - Деканат (Cloud)", layout="wide", page_icon="🎓")
 
-# --- РОБОТА З GOOGLE SHEETS (ВИПРАВЛЕНО) ---
+# --- РОБОТА З GOOGLE SHEETS (ВИПРАВЛЕНО ДЛЯ ЗАПИСУ) ---
 
 def get_connection():
-    """Створює підключення. Налаштування Service Account мають бути в Secrets."""
+    """Створює підключення. Налаштування мають бути в Secrets додатка."""
     return st.connection("gsheets", type=GSheetsConnection)
 
 def read_sheet(sheet_name):
-    """Безпечне читання конкретного аркуша за його назвою"""
+    """Безпечне читання аркуша"""
     try:
         conn = get_connection()
-        # Ми прибираємо spreadsheet=SPREADSHEET_URL, бо ID таблиці 
-        # тепер має бути прописаний у secrets.toml
+        # ВАЖЛИВО: ми не використовуємо SPREADSHEET_URL тут, 
+        # бо URL має бути прописаний у secrets.toml
         df = conn.read(worksheet=sheet_name, ttl=0)
         return df.dropna(how='all')
-    except Exception as e:
-        # Якщо аркуш не знайдено або він порожній
+    except Exception:
+        # Якщо аркуш порожній або помилка, повертаємо структуру, щоб не було помилок входу
+        if sheet_name == "users":
+            return pd.DataFrame(columns=["username", "password", "role", "full_name", "group_link"])
         return pd.DataFrame()
 
 def save_sheet(sheet_name, df):
-    """Повне оновлення аркуша. Вимагає прав 'Редактор' для Service Account."""
+    """Повне оновлення аркуша (Потребує прав Service Account)"""
     try:
         conn = get_connection()
-        # Обов'язково вказуємо назву аркуша
+        # Очищуємо порожні рядки перед збереженням
+        df = df.dropna(how='all')
         conn.update(worksheet=sheet_name, data=df)
+        return True
     except Exception as e:
-        st.error(f"Помилка запису в аркуш '{sheet_name}'. Перевірте права доступу Service Account!")
+        # Не показуємо помилку користувачу відразу, а логуємо її для себе
+        print(f"Error writing to {sheet_name}: {e}")
+        return False
 
 def append_row(sheet_name, new_row_dict):
-    """Додавання одного рядка (використовується при реєстрації та логуванні)"""
+    """Додавання рядка (Реєстрація)"""
     df = read_sheet(sheet_name)
-    # Створюємо новий DataFrame з одного рядка
-    new_row_df = pd.DataFrame([new_row_dict])
-    # Об'єднуємо зі старими даними
-    updated_df = pd.concat([df, new_row_df], ignore_index=True)
-    # Зберігаємо оновлений аркуш
-    save_sheet(sheet_name, updated_df)
+    new_df = pd.concat([df, pd.DataFrame([new_row_dict])], ignore_index=True)
+    if save_sheet(sheet_name, new_df):
+        st.success(f"Запис в аркуш '{sheet_name}' успішний!")
+    else:
+        st.error(f"Помилка запису. Перевірте, чи додано Email сервісного акаунта як 'Редактора' в Google Таблиці!")
     
 # --- БЕЗПЕКА ---
 
