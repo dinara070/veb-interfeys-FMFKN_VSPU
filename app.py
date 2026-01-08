@@ -16,42 +16,114 @@ SPREADSHEET_URL = "https://docs.google.com/spreadsheets/d/1PRSI150082txAU7fjscbd
 
 st.set_page_config(page_title="ФМФКН - Деканат (Cloud)", layout="wide", page_icon="🎓")
 
-# --- РОБОТА З GOOGLE SHEETS ---
+# --- РОБОТА З GOOGLE SHEETS (ВИПРАВЛЕНО) ---
 
 def get_connection():
+    """Створює підключення. Дані Service Account мають бути в Secrets."""
+    # Важливо: переконайтеся, що в Secrets налаштовано [connections.gsheets]
     return st.connection("gsheets", type=GSheetsConnection)
 
 def read_sheet(sheet_name):
-    """Читає аркуш. Якщо аркуш порожній, створює структуру з заголовками."""
+    """Безпечне читання аркуша"""
     try:
         conn = get_connection()
+        # НЕ використовуємо spreadsheet=SPREADSHEET_URL тут, 
+        # ID таблиці має бути в налаштуваннях з'єднання в Secrets
         df = conn.read(worksheet=sheet_name, ttl=0)
         df = df.dropna(how='all')
+        
+        # Якщо аркуш порожній, повертаємо структуру, щоб не було помилки "База порожня"
         if df.empty and sheet_name == "users":
             return pd.DataFrame(columns=["username", "password", "role", "full_name", "group_link"])
         return df
-    except Exception:
-        # Створюємо структуру за замовчуванням, щоб уникнути помилок "Empty Database"
-        cols = ["username", "password", "role", "full_name", "group_link"] if sheet_name == "users" else []
-        return pd.DataFrame(columns=cols)
+    except Exception as e:
+        # У разі помилки повертаємо пустий DataFrame з потрібними колонками
+        if sheet_name == "users":
+            return pd.DataFrame(columns=["username", "password", "role", "full_name", "group_link"])
+        return pd.DataFrame()
 
 def save_sheet(sheet_name, df):
-    """Записує дані в хмару. Якщо виникає помилка доступу — виводить інструкцію."""
+    """Записує дані в хмару."""
     try:
         conn = get_connection()
-        conn.update(worksheet=sheet_name, data=df)
+        # Очищуємо порожні записи перед збереженням
+        df_to_save = df.dropna(how='all')
+        conn.update(worksheet=sheet_name, data=df_to_save)
         return True
     except Exception as e:
-        st.error(f"❌ Помилка доступу до аркуша '{sheet_name}'")
-        st.info(f"**Будь ласка, перевірте доступ:**\n1. Відкрийте вашу Google Таблицю.\n2. Натисніть кнопку 'Поділитися' (Share).\n3. Додайте **elizavetacorna72@gmail.com** з правами **Редактор** (Editor).")
+        # Це повідомлення з'явиться, якщо ви не додали email сервісного акаунта в таблицю
+        st.error(f"❌ Помилка запису в аркуш '{sheet_name}'")
+        st.info(f"Перевірте, чи додано ваш Service Account Email як 'Редактора' в налаштуваннях доступу Google Таблиці.")
         return False
 
 def append_row(sheet_name, new_row_dict):
-    """Додає новий рядок (наприклад, при реєстрації)"""
+    """Додає новий рядок (при реєстрації)"""
     df = read_sheet(sheet_name)
-    new_df = pd.concat([df, pd.DataFrame([new_row_dict])], ignore_index=True)
-    if save_sheet(sheet_name, new_df):
-        st.toast("✅ Дані успішно збережено в хмарі!")
+    new_row_df = pd.DataFrame([new_row_dict])
+    updated_df = pd.concat([df, new_row_df], ignore_index=True)
+    if save_sheet(sheet_name, updated_df):
+        st.toast("✅ Дані синхронізовано з хмарою")
+
+# --- ВИПРАВЛЕНА ЛОГІКА РЕЄСТРАЦІЇ ---
+
+def login_register_page():
+    col1, col2, col3 = st.columns([1, 2, 1])
+    with col2:
+        st.markdown("<h2 style='text-align: center;'>🎓 Проєкт Деканат .net</h2>", unsafe_allow_html=True)
+        mode = st.tabs(["🔐 Увійти", "📝 Реєстрація"])
+        
+        # Читаємо базу ОДИН раз на початку
+        users_df = read_sheet("users")
+
+        with mode[0]:
+            username = st.text_input("Логін:", key="login_u")
+            password = st.text_input("Пароль:", type='password', key="login_p")
+            
+            # Блок Капчі
+            captcha_val = "56388"
+            st.code(captcha_val, language=None)
+            user_captcha = st.text_input("Код підтвердження:", key="login_c")
+
+            if st.button("Увійти", use_container_width=True):
+                if user_captcha != captcha_val:
+                    st.error("Невірний код капчі")
+                elif not users_df.empty:
+                    hashed = make_hashes(password)
+                    user_match = users_df[(users_df['username'] == username) & (users_df['password'] == hashed)]
+                    if not user_match.empty:
+                        perform_login(user_match.iloc[0])
+                    else:
+                        st.error("Невірний логін або пароль")
+                else:
+                    st.warning("База користувачів порожня. Будь ласка, зареєструйтесь.")
+
+        with mode[1]:
+            st.markdown("### Створити обліковий запис")
+            new_u = st.text_input("Вигадайте логін", key="reg_u")
+            new_p = st.text_input("Вигадайте пароль", type='password', key="reg_p")
+            new_n = st.text_input("Повне ПІБ", key="reg_n")
+            role = st.selectbox("Посада", ["dean", "admin", "teacher"])
+
+            if st.button("Зареєструватися", use_container_width=True):
+                if new_u and new_p and new_n:
+                    # Перевірка чи логін не зайнятий
+                    if not users_df.empty and new_u in users_df['username'].values:
+                        st.error("Цей логін вже зайнятий!")
+                    else:
+                        new_data = {
+                            "username": new_u,
+                            "password": make_hashes(new_p),
+                            "role": role,
+                            "full_name": new_n,
+                            "group_link": "Staff"
+                        }
+                        # Використовуємо spinner, щоб користувач не натискав кнопку двічі
+                        with st.spinner("Зберігаємо дані в Google Sheets..."):
+                            append_row("users", new_data)
+                        st.success("Реєстрація успішна! Тепер перейдіть на вкладку 'Увійти'.")
+                        st.balloons()
+                else:
+                    st.error("Заповніть усі поля!")
     
 # --- БЕЗПЕКА ---
 
