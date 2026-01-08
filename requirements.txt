@@ -1,6 +1,6 @@
 streamlit
-st-gsheets-connection
 streamlit-cookies-controller
 pandas
 altair
 xlsxwriter
+openpyxl
