@@ -6,22 +6,53 @@ import hashlib
 from datetime import datetime
 import io
 import altair as alt
-import re  # Для логіки переведення курсів
+import re
+
+# Ініціалізація контролера кукі (для збереження логіна на роки)
+controller = CookieController()
 
 # --- КОНФІГУРАЦІЯ СТОРІНКИ ---
 st.set_page_config(page_title="ФМФКН - Деканат", layout="wide", page_icon="🎓")
 
-# --- ЛОГІКА ПЕРЕМИКАННЯ ТЕМИ ---
+# --- БАЗОВІ ФУНКЦІЇ БД ТА БЕЗПЕКИ ---
+def create_connection():
+    # Файл БД зберігається локально. Дані в ньому зберігаються вічно, поки файл існує.
+    return sqlite3.connect('university_v22.db', check_same_thread=False)
+
+def make_hashes(password):
+    return hashlib.sha256(str.encode(password)).hexdigest()
+
+def check_hashes(password, hashed_text):
+    return make_hashes(password) == hashed_text
+
+def perform_login(user):
+    """Авторизація та збереження логіна в браузері користувача"""
+    st.session_state['logged_in'] = True
+    st.session_state['username'] = user[0]
+    st.session_state['role'] = user[2]
+    st.session_state['full_name'] = user[3]
+    st.session_state['group'] = user[4]
+    
+    # Зберігаємо username в кукі. Навіть через рік браузер його пам'ятатиме.
+    controller.set('remember_user', user[0]) 
+    
+    # Логування входу
+    ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    conn = create_connection()
+    conn.execute("INSERT INTO system_logs (user, action, details, timestamp) VALUES (?,?,?,?)", 
+                 (user[3], "Login", "Вхід у систему", ts))
+    conn.commit()
+    
+    st.success(f"Вітаємо, {user[3]}!")
+    st.rerun()
+
+# --- ЛОГІКА ТЕМИ ---
 if 'theme' not in st.session_state:
     st.session_state.theme = 'light'
 
 def toggle_theme():
-    if st.session_state.theme == 'light':
-        st.session_state.theme = 'dark'
-    else:
-        st.session_state.theme = 'light'
+    st.session_state.theme = 'dark' if st.session_state.theme == 'light' else 'light'
 
-# --- CSS СТИЛІ ---
 dark_css = """
 <style>
     .stApp { background-color: #0E1117; color: #FFFFFF; }
@@ -54,17 +85,11 @@ light_css = """
 </style>
 """
 
+# Застосування стилю
 if st.session_state.theme == 'dark':
     st.markdown(dark_css, unsafe_allow_html=True)
 else:
     st.markdown(light_css, unsafe_allow_html=True)
-
-# Застосовуємо обраний стиль залежно від стану в session_state
-if st.session_state.theme == 'dark':
-    st.markdown(dark_css, unsafe_allow_html=True)
-else:
-    st.markdown(light_css, unsafe_allow_html=True)
-
 
 # --- КОНСТАНТИ ТА ПРАВА ДОСТУПУ ---
 ROLES_LIST = ["dean", "admin"]
@@ -294,116 +319,93 @@ def convert_df_to_csv(df):
 controller = CookieController()
 
 def perform_login(user):
+    """Обробка успішного входу в систему"""
     st.session_state['logged_in'] = True
     st.session_state['username'] = user[0]
     st.session_state['role'] = user[2]
     st.session_state['full_name'] = user[3]
     st.session_state['group'] = user[4]
     
-    controller.set('user_fingerprint', user[0]) 
+    # Зберігаємо логін у кукі для автозаповнення при наступному візиті
+    controller.set('user_login_hint', user[0]) 
     
-    log_action(user[3], "Login", f"Вхід у систему: {user[2]}")
+    log_action(user[3], "Login", f"Вхід у систему")
     st.success(f"Вітаємо, {user[3]}!")
     st.rerun()
 
 # --- СТОРІНКИ ---
 
 def login_register_page():
-    st.header("🔐 Вхід / Реєстрація")
+    """Оновлена сторінка входу та реєстрації з тривалим збереженням даних"""
+    col1, col2, col3 = st.columns([1, 2, 1])
     
-    # 1. Ініціалізація збережених акаунтів у сесії (для випадаючого списку)
-    if 'saved_accounts' not in st.session_state:
-        conn = create_connection()
-        try:
-            accs = pd.read_sql("SELECT username FROM users", conn)['username'].tolist()
-            st.session_state['saved_accounts'] = accs
-        except:
-            st.session_state['saved_accounts'] = []
-
-    # 2. ЛОГІКА "АВТОМАТИЧНЕ ВПІЗНАННЯ" ЧЕРЕЗ COOKIE
-    saved_token = controller.get('user_fingerprint')
-    if saved_token and not st.session_state.get('logged_in'):
+    with col2:
+        st.markdown("<h2 style='text-align: center;'>🎓 Project Deanery .net</h2>", unsafe_allow_html=True)
+        
+        # Вибір режиму: Вхід або Реєстрація через вкладки
+        mode = st.tabs(["🔐 Увійти", "📝 Реєстрація"])
+        
         conn = create_connection()
         c = conn.cursor()
-        c.execute('SELECT * FROM users WHERE username=?', (saved_token,))
-        user = c.fetchone()
-        if user:
-            st.info(f"👋 Система впізнала ваш пристрій як: **{user[3]}**")
-            if st.button("Увійти автоматично (я забув пароль)"):
-                perform_login(user)
-                return 
 
-    # 3. ОСНОВНИЙ ІНТЕРФЕЙС (Радіо-кнопки)
-    action = st.radio("Оберіть дію:", ["Вхід", "Реєстрація", "Швидкий вхід"], horizontal=True)
-    conn = create_connection()
-    c = conn.cursor()
-
-    # --- ШВИДКИЙ ВХІД ---
-    if action == "Швидкий вхід":
-        st.info("Оберіть збережений акаунт для входу")
-        if st.session_state['saved_accounts']:
-            selected_user = st.selectbox("Ваш логін", st.session_state['saved_accounts'])
-            password = st.text_input("Пароль", type='password', key="quick_pass")
+        # --- ВКЛАДКА ВХОДУ ---
+        with mode[0]:
+            # Читаємо збережений логін з кукі браузера (ключ remember_user)
+            saved_username = controller.get('remember_user')
             
-            if st.button("Увійти"):
-                c.execute('SELECT * FROM users WHERE username=? AND password=?', (selected_user, make_hashes(password)))
-                user = c.fetchone()
-                if user:
-                    perform_login(user)
+            username = st.text_input("Ім'я користувача (Username):", value=saved_username if saved_username else "", key="login_user")
+            password = st.text_input("Пароль:", type='password', key="login_pass")
+            
+            # Блок Капчі (цифровий код підтвердження)
+            st.divider()
+            captcha_val = "56388"
+            st.markdown(f"**Код підтвердження:**")
+            st.code(captcha_val, language=None)
+            user_captcha = st.text_input("Введіть код, який ви бачите вище:", key="login_captcha")
+            
+            if st.button("Увійти в систему", use_container_width=True):
+                if user_captcha != captcha_val:
+                    st.error("❌ Невірний код підтвердження. Спробуйте ще раз.")
+                elif username and password:
+                    hashed_input = make_hashes(password)
+                    c.execute('SELECT * FROM users WHERE username=? AND password=?', (username, hashed_input))
+                    user = c.fetchone()
+                    if user:
+                        perform_login(user)
+                    else:
+                        st.error("❌ Користувача не знайдено або пароль невірний. Перевірте дані.")
                 else:
-                    st.error("Невірний пароль для цього користувача")
-        else:
-            st.warning("Немає збережених акаунтів.")
+                    st.warning("⚠️ Будь ласка, заповніть усі поля для входу.")
 
-
-    # --- ЗВИЧАЙНИЙ ВХІД ---
-    elif action == "Вхід":
-        username = st.text_input("Логін")
-        password = st.text_input("Пароль", type='password')
-        remember_me = st.checkbox("Запам'ятати мене на цьому пристрої")
-        
-        if st.button("Увійти"):
-            # Хешуємо введений пароль, щоб порівняти з тим, що в базі
-            hashed_input = make_hashes(password)
-            c.execute('SELECT * FROM users WHERE username=? AND password=?', (username, hashed_input))
-            user = c.fetchone()
+        # --- ВКЛАДКА РЕЄСТРАЦІЇ ---
+        with mode[1]:
+            st.markdown("### Первинна реєстрація")
+            st.info("Ви реєструєтесь один раз. Після цього ваш акаунт буде зберігатися в базі постійно.")
             
-            if user:
-                if remember_me:
-                    # Зберігаємо логін в кукі, щоб система впізнала пристрій пізніше
-                    controller.set('user_fingerprint', username)
-                    if username not in st.session_state['saved_accounts']:
-                        st.session_state['saved_accounts'].append(username)
-                perform_login(user)
-            else:
-                st.error("Невірний логін або пароль. Перевірте мову розкладки та CapsLock.")
+            new_user = st.text_input("Придумайте унікальний логін:", key="reg_user_new")
+            new_pass = st.text_input("Придумайте надійний пароль:", type='password', key="reg_pass_new")
+            full_name = st.text_input("Ваше повне ПІБ (напр. Іванов Іван Іванович):", key="reg_full_name")
+            role_choice = st.selectbox("Оберіть вашу посаду:", ROLES_LIST, key="reg_role_select")
 
-    # --- РЕЄСТРАЦІЯ ---
-    elif action == "Реєстрація":
-        st.info("Реєстрація доступна для персоналу та адміністрації")
-        new_user = st.text_input("Вигадайте логін")
-        new_pass = st.text_input("Вигадайте пароль", type='password')
-        role = st.selectbox("Ваша посада / Роль", ROLES_LIST)
-        full_name = st.text_input("Ваше ПІБ (повністю)")
-
-        if st.button("Зареєструватися"):
-            if new_user and new_pass and full_name:
-                # Хешуємо пароль перед збереженням!
-                hashed_password = make_hashes(new_pass)
-                try:
-                    # Додаємо в базу
-                    c.execute('INSERT INTO users (username, password, role, full_name, group_link) VALUES (?,?,?,?,?)', 
-                              (new_user, hashed_password, role, full_name, "Staff/Admin"))
-                    conn.commit()
-                    
-                    # Відразу запам'ятовуємо користувача
-                    controller.set('user_fingerprint', new_user)
-                    st.success("Обліковий запис створено! Тепер ви можете увійти.")
-                    st.balloons()
-                except sqlite3.IntegrityError:
-                    st.error("Цей логін вже зайнятий. Оберіть інший.")
-            else:
-                st.warning("Будь ласка, заповніть усі поля.")
+            if st.button("Створити обліковий запис", use_container_width=True):
+                if new_user and new_pass and full_name:
+                    try:
+                        hashed_pw = make_hashes(new_pass)
+                        # Записуємо в базу даних. Ці дані залишаться в файлі .db
+                        c.execute('INSERT INTO users (username, password, role, full_name, group_link) VALUES (?,?,?,?,?)', 
+                                  (new_user, hashed_pw, role_choice, full_name, "Staff"))
+                        conn.commit()
+                        
+                        # Зберігаємо логін в кукі, щоб поле 'Username' у вкладці входу заповнилося автоматично
+                        controller.set('remember_user', new_user)
+                        
+                        st.success("🎉 Реєстрація успішна! Ваш акаунт створено та внесено в базу.")
+                        st.info("Тепер просто перейдіть на вкладку **'🔐 Увійти'** — ваш логін вже підставлено.")
+                        st.balloons()
+                    except sqlite3.IntegrityError:
+                        st.error("⚠️ Цей логін вже зайнятий. Будь ласка, оберіть інший.")
+                else:
+                    st.warning("⚠️ Для реєстрації необхідно заповнити всі доступні поля.")
 
 def main_panel():
     st.title("🏠 Головна панель")
