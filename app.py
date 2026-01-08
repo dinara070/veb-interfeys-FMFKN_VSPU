@@ -16,28 +16,32 @@ SPREADSHEET_URL = "https://docs.google.com/spreadsheets/d/1PRSI150082txAU7fjscbd
 
 st.set_page_config(page_title="ФМФКН - Деканат (Cloud)", layout="wide", page_icon="🎓")
 
+import streamlit as st
+from streamlit_gsheets import GSheetsConnection
+import pandas as pd
+import hashlib
+from datetime import datetime
+
 # --- РОБОТА З GOOGLE SHEETS (ВИПРАВЛЕНО) ---
 
 def get_connection():
-    """Створює підключення. Дані Service Account мають бути в Secrets."""
-    # Важливо: переконайтеся, що в Secrets налаштовано [connections.gsheets]
+    """Створює підключення. Дані Service Account автоматично беруться з Secrets."""
     return st.connection("gsheets", type=GSheetsConnection)
 
 def read_sheet(sheet_name):
-    """Безпечне читання аркуша"""
+    """Безпечне читання аркуша. Якщо порожньо — створює структуру."""
     try:
         conn = get_connection()
-        # НЕ використовуємо spreadsheet=SPREADSHEET_URL тут, 
-        # ID таблиці має бути в налаштуваннях з'єднання в Secrets
+        # Ми більше не передаємо SPREADSHEET_URL, він вже в Secrets
         df = conn.read(worksheet=sheet_name, ttl=0)
         df = df.dropna(how='all')
         
-        # Якщо аркуш порожній, повертаємо структуру, щоб не було помилки "База порожня"
+        # Створюємо заголовки, якщо аркуш зовсім новий або порожній
         if df.empty and sheet_name == "users":
             return pd.DataFrame(columns=["username", "password", "role", "full_name", "group_link"])
         return df
-    except Exception as e:
-        # У разі помилки повертаємо пустий DataFrame з потрібними колонками
+    except Exception:
+        # Повертаємо порожню структуру для безпечної роботи входу/реєстрації
         if sheet_name == "users":
             return pd.DataFrame(columns=["username", "password", "role", "full_name", "group_link"])
         return pd.DataFrame()
@@ -46,23 +50,22 @@ def save_sheet(sheet_name, df):
     """Записує дані в хмару."""
     try:
         conn = get_connection()
-        # Очищуємо порожні записи перед збереженням
         df_to_save = df.dropna(how='all')
         conn.update(worksheet=sheet_name, data=df_to_save)
         return True
     except Exception as e:
-        # Це повідомлення з'явиться, якщо ви не додали email сервісного акаунта в таблицю
+        # Якщо Service Account не додано як Редактора, вискочить ця інструкція
         st.error(f"❌ Помилка запису в аркуш '{sheet_name}'")
-        st.info(f"Перевірте, чи додано ваш Service Account Email як 'Редактора' в налаштуваннях доступу Google Таблиці.")
+        st.info("💡 **Як виправити:** Скопіюйте `client_email` з ваших Secrets, зайдіть у Google Sheets -> Share і додайте його з правами **Editor**.")
         return False
 
 def append_row(sheet_name, new_row_dict):
-    """Додає новий рядок (при реєстрації)"""
+    """Додавання одного рядка (використовується при реєстрації)"""
     df = read_sheet(sheet_name)
     new_row_df = pd.DataFrame([new_row_dict])
     updated_df = pd.concat([df, new_row_df], ignore_index=True)
     if save_sheet(sheet_name, updated_df):
-        st.toast("✅ Дані синхронізовано з хмарою")
+        st.toast(f"✅ Дані '{sheet_name}' успішно оновлено")
 
 # --- ВИПРАВЛЕНА ЛОГІКА РЕЄСТРАЦІЇ ---
 
@@ -127,29 +130,23 @@ def login_register_page():
     
 # --- БЕЗПЕКА ---
 
+# --- БЕЗПЕКА ТА АВТОРИЗАЦІЯ ---
+
 def make_hashes(password):
+    """Шифрування пароля для безпечного зберігання"""
     return hashlib.sha256(str.encode(password)).hexdigest()
 
-def log_action(user_name, action, details):
-    ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    append_row("system_logs", {
-        "user": user_name, 
-        "action": action, 
-        "details": details, 
-        "timestamp": ts
-    })
-
 def perform_login(user_row):
-    """Приймає рядок з DataFrame (Series)"""
+    """Процедура успішного входу в систему"""
     st.session_state['logged_in'] = True
     st.session_state['username'] = user_row['username']
     st.session_state['role'] = user_row['role']
     st.session_state['full_name'] = user_row['full_name']
-    st.session_state['group'] = user_row['group_link']
+    # .get() захищає від помилки, якщо колонки group_link немає в таблиці
+    st.session_state['group'] = user_row.get('group_link', 'Staff')
     
-    controller.set('remember_user', user_row['username']) 
-    log_action(user_row['full_name'], "Login", "Вхід у хмарну систему")
     st.success(f"Вітаємо, {user_row['full_name']}!")
+    # st.rerun() оновить сторінку, щоб показати робочу панель
     st.rerun()
     
 # --- ТЕМА ---
@@ -408,27 +405,30 @@ def perform_login(user):
 # --- СТОРІНКИ ---
 
 def login_register_page():
-    """Сторінка входу та реєстрації з використанням Google Sheets"""
+    """Сторінка входу та реєстрації з використанням Google Sheets та Service Account"""
+    # Центрування інтерфейсу за допомогою колонок
     col1, col2, col3 = st.columns([1, 2, 1])
     
     with col2:
-        st.markdown("<h2 style='text-align: center;'>🎓 Project Deanery .net</h2>", unsafe_allow_html=True)
+        st.markdown("<h2 style='text-align: center;'>🎓 Проєкт Деканат .net</h2>", unsafe_allow_html=True)
         
         # Вибір режиму: Вхід або Реєстрація через вкладки
         mode = st.tabs(["🔐 Увійти", "📝 Реєстрація"])
         
-        # Завантажуємо актуальний список користувачів з Google Sheets
+        # Завантажуємо актуальний список користувачів з Google Sheets ОДИН раз
         users_df = read_sheet("users")
 
         # --- ВКЛАДКА ВХОДУ ---
         with mode[0]:
-            # Читаємо збережений логін з кукі браузера
+            # Читаємо збережений логін з кукі браузера для зручності
             saved_username = controller.get('remember_user')
             
-            username = st.text_input("Логін (Username):", value=saved_username if saved_username else "", key="login_user")
-            password = st.text_input("Пароль:", type='password', key="login_pass")
+            u_login = st.text_input("Логін (Username):", 
+                                    value=saved_username if saved_username else "", 
+                                    key="login_user")
+            u_pass = st.text_input("Пароль:", type='password', key="login_pass")
             
-            # Блок Капчі (залишаємо для безпеки)
+            # Блок Капчі (Код підтвердження)
             st.divider()
             captcha_val = "56388"
             st.markdown(f"**Код підтвердження:**")
@@ -438,17 +438,15 @@ def login_register_page():
             if st.button("Увійти в систему", use_container_width=True):
                 if user_captcha != captcha_val:
                     st.error("❌ Невірний код підтвердження.")
-                elif username and password:
+                elif u_login and u_pass:
                     if not users_df.empty:
-                        hashed_input = make_hashes(password)
+                        hashed_input = make_hashes(u_pass)
                         # Пошук користувача в DataFrame
-                        user_match = users_df[(users_df['username'] == username) & (users_df['password'] == hashed_input)]
+                        user_match = users_df[(users_df['username'] == u_login) & (users_df['password'] == hashed_input)]
                         
                         if not user_match.empty:
-                            # Отримуємо дані першого знайденого користувача
-                            user_data = user_match.iloc[0]
-                            # Викликаємо функцію авторизації (вже адаптовану під словник/Series)
-                            perform_login(user_data)
+                            # Отримуємо дані першого знайденого користувача та авторизуємо
+                            perform_login(user_match.iloc[0])
                         else:
                             st.error("❌ Користувача не знайдено або пароль невірний.")
                     else:
@@ -461,39 +459,42 @@ def login_register_page():
             st.markdown("### Первинна реєстрація")
             st.info("Після реєстрації ваші дані будуть надійно збережені в хмарі Google Sheets.")
             
-            new_user = st.text_input("Придумайте унікальний логін:", key="reg_user_new")
-            new_pass = st.text_input("Придумайте надійний пароль:", type='password', key="reg_pass_new")
-            full_name = st.text_input("Ваше повне ПІБ:", key="reg_full_name")
-            role_choice = st.selectbox("Оберіть вашу посаду:", ROLES_LIST, key="reg_role_select")
+            new_u = st.text_input("Придумайте унікальний логін:", key="reg_user_new")
+            new_p = st.text_input("Придумайте надійний пароль:", type='password', key="reg_pass_new")
+            new_n = st.text_input("Ваше повне ПІБ:", key="reg_full_name")
+            new_r = st.selectbox("Оберіть вашу посаду:", ROLES_LIST, key="reg_role_select")
 
             if st.button("Створити обліковий запис", use_container_width=True):
-                if new_user and new_pass and full_name:
+                if new_u and new_p and new_n:
                     # Перевірка, чи не зайнятий логін
                     is_taken = False
                     if not users_df.empty:
-                        is_taken = new_user in users_df['username'].values
+                        is_taken = new_u in users_df['username'].values
                     
                     if is_taken:
                         st.error("⚠️ Цей логін вже зайнятий. Оберіть інший.")
                     else:
-                        # Додаємо нового користувача в Google Sheets
+                        # Формуємо словник даних нового користувача
                         new_user_data = {
-                            "username": new_user,
-                            "password": make_hashes(new_pass),
-                            "role": role_choice,
-                            "full_name": full_name,
+                            "username": new_u,
+                            "password": make_hashes(new_p),
+                            "role": new_r,
+                            "full_name": new_n,
                             "group_link": "Staff"
                         }
-                        append_row("users", new_user_data)
                         
-                        # Зберігаємо логін в кукі для зручності
-                        controller.set('remember_user', new_user)
+                        # Додаємо нового користувача в Google Sheets з анімацією завантаження
+                        with st.spinner("Запис у хмару..."):
+                            append_row("users", new_user_data)
+                        
+                        # Зберігаємо логін в кукі для зручності майбутнього входу
+                        controller.set('remember_user', new_u)
                         
                         st.success("🎉 Реєстрація успішна! Дані збережено в хмарі.")
                         st.info("Тепер перейдіть на вкладку **'🔐 Увійти'**.")
                         st.balloons()
                 else:
-                    st.warning("⚠️ Для реєстрації необхідно заповнити всі поля.")
+                    st.error("⚠️ Для реєстрації необхідно заповнити всі поля.")
 
 def main_panel():
     st.title("🏠 Головна панель (Cloud)")
@@ -1777,9 +1778,9 @@ def main():
     if 'logged_in' not in st.session_state:
         st.session_state['logged_in'] = False
 
-    # 2. Перевірка статусу авторизації
+    # 2. Перевірка статусу авторизації (ЛОГІКА ВАШОГО "ЗАПУСКУ")
     if not st.session_state['logged_in']:
-        # Показуємо сторінку входу, якщо користувач не зайшов
+        # Якщо користувач не авторизований — показуємо сторінку входу/реєстрації
         login_register_page()
     else:
         # --- БОКОВА ПАНЕЛЬ (SIDEBAR) ---
@@ -1804,7 +1805,6 @@ def main():
         st.sidebar.divider()
 
         # 3. НАЛАШТУВАННЯ ДИНАМІЧНОГО МЕНЮ
-        # Базове меню, доступне всім
         menu_options = {
             "🏠 Головна панель": main_panel,
             "👥 Студенти та групи": students_groups_view,
@@ -1833,12 +1833,14 @@ def main():
         choice = st.sidebar.radio("Навігація", menu_list)
 
         if choice == "🚪 Вийти з системи":
+            # ЛОГІКА КНОПКИ "ВИЙТИ"
             st.session_state['logged_in'] = False
             st.session_state['username'] = None
             st.session_state['role'] = None
             st.rerun()
         else:
-            # Викликаємо функцію, яка відповідає вибору
+            # Викликаємо функцію, яка відповідає вибраній сторінці
+            # Це замінює напис "Ви успішно увійшли" реальними сторінками
             menu_options[choice]()
 
         # Футер бічної панелі
@@ -1846,5 +1848,6 @@ def main():
         st.sidebar.caption("Project Deanery .net v2.0 (Cloud)")
 
 # --- ТОЧКА ВХОДУ ---
+# Це найважливіший рядок, який запускає все, що написано вище
 if __name__ == '__main__':
     main()
