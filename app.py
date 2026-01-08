@@ -16,31 +16,43 @@ SPREADSHEET_URL = "https://docs.google.com/spreadsheets/d/1PRSI150082txAU7fjscbd
 
 st.set_page_config(page_title="ФМФКН - Деканат (Cloud)", layout="wide", page_icon="🎓")
 
-# --- РОБОТА З GOOGLE SHEETS ---
+# --- РОБОТА З GOOGLE SHEETS (ВИПРАВЛЕНО) ---
 
 def get_connection():
+    """Створює підключення. Налаштування Service Account мають бути в Secrets."""
     return st.connection("gsheets", type=GSheetsConnection)
 
 def read_sheet(sheet_name):
-    """Читає аркуш, повертає пустий DF, якщо виникла помилка або аркуш порожній"""
+    """Безпечне читання конкретного аркуша за його назвою"""
     try:
         conn = get_connection()
-        df = conn.read(spreadsheet=SPREADSHEET_URL, worksheet=sheet_name, ttl=0)
+        # Ми прибираємо spreadsheet=SPREADSHEET_URL, бо ID таблиці 
+        # тепер має бути прописаний у secrets.toml
+        df = conn.read(worksheet=sheet_name, ttl=0)
         return df.dropna(how='all')
-    except Exception:
+    except Exception as e:
+        # Якщо аркуш не знайдено або він порожній
         return pd.DataFrame()
 
 def save_sheet(sheet_name, df):
-    """Повністю перезаписує аркуш"""
-    conn = get_connection()
-    conn.update(spreadsheet=SPREADSHEET_URL, worksheet=sheet_name, data=df)
+    """Повне оновлення аркуша. Вимагає прав 'Редактор' для Service Account."""
+    try:
+        conn = get_connection()
+        # Обов'язково вказуємо назву аркуша
+        conn.update(worksheet=sheet_name, data=df)
+    except Exception as e:
+        st.error(f"Помилка запису в аркуш '{sheet_name}'. Перевірте права доступу Service Account!")
 
 def append_row(sheet_name, new_row_dict):
-    """Додає рядок у Google Sheets"""
+    """Додавання одного рядка (використовується при реєстрації та логуванні)"""
     df = read_sheet(sheet_name)
-    new_df = pd.concat([df, pd.DataFrame([new_row_dict])], ignore_index=True)
-    save_sheet(sheet_name, new_df)
-
+    # Створюємо новий DataFrame з одного рядка
+    new_row_df = pd.DataFrame([new_row_dict])
+    # Об'єднуємо зі старими даними
+    updated_df = pd.concat([df, new_row_df], ignore_index=True)
+    # Зберігаємо оновлений аркуш
+    save_sheet(sheet_name, updated_df)
+    
 # --- БЕЗПЕКА ---
 
 def make_hashes(password):
