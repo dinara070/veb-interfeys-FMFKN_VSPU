@@ -21,6 +21,24 @@ st.set_page_config(page_title="ФМФКН - Деканат (Cloud)", layout="wid
 # --- НОВІ ФУНКЦІЇ ДЛЯ GOOGLE SHEETS ---
 
 def get_connection():
+    return st.connection("gsheets", type=GSheetsConnection)
+
+def read_sheet(sheet_name):
+    conn = get_connection()
+    return conn.read(spreadsheet=SPREADSHEET_URL, worksheet=sheet_name, ttl=0)
+
+def save_sheet(sheet_name, df): # Виправлено назву з update_sheet для сумісності з вашим кодом нижче
+    conn = get_connection()
+    conn.update(spreadsheet=SPREADSHEET_URL, worksheet=sheet_name, data=df)
+
+def append_row(sheet_name, new_row_dict): # Виправлено назву для сумісності
+    df = read_sheet(sheet_name)
+    new_df = pd.concat([df, pd.DataFrame([new_row_dict])], ignore_index=True)
+    save_sheet(sheet_name, new_df)
+
+# --- НОВІ ФУНКЦІЇ ДЛЯ GOOGLE SHEETS ---
+
+def get_connection():
     """Створює підключення до Google Sheets"""
     return st.connection("gsheets", type=GSheetsConnection)
 
@@ -29,16 +47,16 @@ def read_sheet(sheet_name):
     conn = get_connection()
     return conn.read(spreadsheet=SPREADSHEET_URL, worksheet=sheet_name, ttl=0)
 
-def update_sheet(sheet_name, df):
+def save_sheet(sheet_name, df):
     """Оновлює аркуш повністю новими даними"""
     conn = get_connection()
     conn.update(spreadsheet=SPREADSHEET_URL, worksheet=sheet_name, data=df)
 
-def append_to_sheet(sheet_name, new_row_dict):
+def append_row(sheet_name, new_row_dict):
     """Додає один рядок у кінець аркуша"""
     df = read_sheet(sheet_name)
     new_df = pd.concat([df, pd.DataFrame([new_row_dict])], ignore_index=True)
-    update_sheet(sheet_name, new_df)
+    save_sheet(sheet_name, new_df)
 
 # --- БЕЗПЕКА ТА АВТОРИЗАЦІЯ (Cloud Version) ---
 
@@ -53,16 +71,15 @@ def check_hashes(password, hashed_text):
 def log_action(user_name, action, details):
     """Логування дій прямо в Google Sheets"""
     ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    # Використовуємо словник для додавання рядка через вашу функцію append_to_sheet
     try:
-        append_to_sheet("system_logs", {
+        # Використовуємо функцію append_row для збереження логу
+        append_row("system_logs", {
             "user": user_name, 
             "action": action, 
             "details": details, 
             "timestamp": ts
         })
     except Exception as e:
-        # Резервний метод логування, якщо append_to_sheet не визначена
         st.warning(f"Помилка логування: {e}")
 
 def perform_login(user):
@@ -85,7 +102,7 @@ def perform_login(user):
 
 # --- ЛОГІКА ТЕМИ ТА СТИЛІЗАЦІЯ ---
 
-# Ініціалізація теми у стані сесії, якщо вона ще не створена
+# Ініціалізація теми у стані сесії
 if 'theme' not in st.session_state:
     st.session_state.theme = 'light'
 
