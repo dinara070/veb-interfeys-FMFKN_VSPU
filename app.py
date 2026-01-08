@@ -42,49 +42,54 @@ def append_to_sheet(sheet_name, new_row_dict):
 # --- БЕЗПЕКА ТА АВТОРИЗАЦІЯ (Cloud Version) ---
 
 def make_hashes(password):
-    """Шифрування пароля"""
+    """Шифрування пароля за допомогою SHA256"""
     return hashlib.sha256(str.encode(password)).hexdigest()
 
 def check_hashes(password, hashed_text):
-    """Перевірка пароля"""
+    """Перевірка відповідності введеного пароля хешу"""
     return make_hashes(password) == hashed_text
 
 def log_action(user_name, action, details):
     """Логування дій прямо в Google Sheets"""
     ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    # Тепер ми використовуємо нову функцію append_to_sheet замість SQL INSERT
-    append_to_sheet("system_logs", {
-        "user": user_name, 
-        "action": action, 
-        "details": details, 
-        "timestamp": ts
-    })
+    # Використовуємо словник для додавання рядка через вашу функцію append_to_sheet
+    try:
+        append_to_sheet("system_logs", {
+            "user": user_name, 
+            "action": action, 
+            "details": details, 
+            "timestamp": ts
+        })
+    except Exception as e:
+        # Резервний метод логування, якщо append_to_sheet не визначена
+        st.warning(f"Помилка логування: {e}")
 
 def perform_login(user):
-    """Авторизація та збереження даних (замість SQLite використовуємо Sheets лог)"""
+    """Авторизація користувача та збереження даних у Session State та Cookies"""
     st.session_state['logged_in'] = True
     st.session_state['username'] = user['username']
     st.session_state['role'] = user['role']
     st.session_state['full_name'] = user['full_name']
-    st.session_state['group'] = user['group_link']
+    st.session_state['group'] = user.get('group_link', 'Staff')
     
-    # Зберігаємо логін у кукі браузера
-    controller.set('remember_user', user['username']) 
+    # Зберігаємо логін у кукі браузера (через ваш контролер)
+    if 'controller' in globals():
+        controller.set('remember_user', user['username']) 
     
-    # Логування входу в таблицю system_logs у Google Sheets
+    # Реєструємо вхід у таблиці логів
     log_action(user['full_name'], "Login", "Вхід у систему (Cloud)")
     
     st.success(f"Вітаємо, {user['full_name']}!")
     st.rerun()
-    
+
 # --- ЛОГІКА ТЕМИ ТА СТИЛІЗАЦІЯ ---
 
-# Ініціалізація теми у стані сесії
+# Ініціалізація теми у стані сесії, якщо вона ще не створена
 if 'theme' not in st.session_state:
     st.session_state.theme = 'light'
 
 def toggle_theme():
-    """Функція для зміни теми"""
+    """Функція для зміни теми між світлою та темною"""
     st.session_state.theme = 'dark' if st.session_state.theme == 'light' else 'light'
 
 # ПОВНІ НАЛАШТУВАННЯ ТЕМНОЇ ТЕМИ
@@ -121,12 +126,12 @@ light_css = """
 </style>
 """
 
-# Автоматичне застосування обраного стилю при кожному оновленні сторінки
+# Автоматичне застосування стилю відповідно до вибраної теми
 if st.session_state.theme == 'dark':
     st.markdown(dark_css, unsafe_allow_html=True)
 else:
     st.markdown(light_css, unsafe_allow_html=True)
-
+    
 # --- КОНСТАНТИ ТА ПРАВА ДОСТУПУ ---
 ROLES_LIST = ["dean", "admin"]
 TEACHER_LEVEL = ['dean', 'admin']
@@ -578,51 +583,94 @@ def main_panel():
 
 def students_groups_view():
     st.title("👥 Студенти та Групи")
-    conn = create_connection()
-    all_groups = ["Всі"] + list(GROUPS_DATA.keys())
-    selected_group = st.selectbox("Фільтр по групі:", all_groups)
-    query = "SELECT id, full_name as 'ПІБ', group_name as 'Група' FROM students"
-    if selected_group != "Всі": query += f" WHERE group_name='{selected_group}'"
-    df = pd.read_sql_query(query, conn)
-    csv = convert_df_to_csv(df)
-    st.download_button("⬇️ Експортувати (CSV)", csv, "students.csv", "text/csv")
-    st.dataframe(df, use_container_width=True)
     
+    # 1. Завантаження даних з Google Sheets
+    df = read_sheet("students")
+    
+    if df.empty:
+        st.warning("Таблиця студентів порожня.")
+        # Створюємо порожній DF зі структурою, щоб код не падав
+        df = pd.DataFrame(columns=['id', 'full_name', 'group_name'])
+
+    # 2. Фільтрація
+    all_groups = ["Всі"] + sorted(df['group_name'].unique().tolist())
+    selected_group = st.selectbox("Фільтр по групі:", all_groups)
+    
+    display_df = df if selected_group == "Всі" else df[df['group_name'] == selected_group]
+    
+    # 3. Експорт у CSV
+    csv = convert_df_to_csv(display_df)
+    st.download_button("⬇️ Експортувати список (CSV)", csv, "students.csv", "text/csv")
+    
+    # Відображення таблиці
+    st.dataframe(display_df, use_container_width=True)
+    
+    # 4. Блок управління (тільки для DEAN_LEVEL)
     if st.session_state['role'] in DEAN_LEVEL:
         st.divider()
-        st.subheader("🛠️ Управління")
-        t1, t2, t3 = st.tabs(["➕ Додати", "📥 Імпорт", "🗑️ Видалити"])
+        st.subheader("🛠️ Управління контингентом")
+        
+        t1, t2, t3 = st.tabs(["➕ Додати вручну", "📥 Масовий імпорт", "🗑️ Видалити"])
+        
         with t1:
-            with st.form("add_s"):
-                nm = st.text_input("ПІБ")
+            with st.form("add_student_form"):
+                nm = st.text_input("Повне ПІБ студента")
+                # Використовуємо або список з GROUPS_DATA, або вільне введення
                 gr = st.selectbox("Група", list(GROUPS_DATA.keys()))
-                if st.form_submit_button("Додати"):
-                    c = conn.cursor()
-                    c.execute('INSERT INTO students (full_name, group_name) VALUES (?,?)', (nm, gr))
-                    conn.commit()
-                    log_action(st.session_state['full_name'], "Add Student", f"Додано: {nm} в {gr}")
-                    st.success("Додано!")
-                    st.rerun()
-        with t2:
-            if st.session_state['role'] in ['admin', 'dean']:
-                f = st.file_uploader("CSV (full_name, group_name)", type="csv")
-                if f:
-                    try:
-                        df_new = pd.read_csv(f)
-                        df_new[['full_name', 'group_name']].to_sql('students', conn, if_exists='append', index=False)
-                        st.success("Імпортовано!")
+                if st.form_submit_button("Додати студента"):
+                    if nm and gr:
+                        # Створюємо новий ID (макс + 1)
+                        new_id = int(df['id'].max() + 1) if not df.empty and 'id' in df.columns else 1
+                        new_row = pd.DataFrame([{"id": new_id, "full_name": nm, "group_name": gr}])
+                        
+                        updated_df = pd.concat([df, new_row], ignore_index=True)
+                        update_sheet("students", updated_df)
+                        
+                        log_action(st.session_state['full_name'], "Add Student", f"Додано: {nm} ({gr})")
+                        st.success(f"Студента {nm} успішно додано!")
                         st.rerun()
-                    except Exception as e: st.error(f"Помилка: {e}")
+                    else:
+                        st.error("Заповніть ПІБ!")
+
+        with t2:
+            st.info("Завантажте CSV-файл з колонками: full_name, group_name")
+            f = st.file_uploader("Оберіть файл для імпорту", type="csv", key="import_csv_st")
+            if f:
+                try:
+                    df_new = pd.read_csv(f)
+                    if 'full_name' in df_new.columns and 'group_name' in df_new.columns:
+                        # Додаємо ID, якщо їх немає
+                        if 'id' not in df_new.columns:
+                            last_id = int(df['id'].max() if not df.empty else 0)
+                            df_new.insert(0, 'id', range(last_id + 1, last_id + 1 + len(df_new)))
+                        
+                        combined_df = pd.concat([df, df_new], ignore_index=True)
+                        update_sheet("students", combined_df)
+                        
+                        st.success(f"Імпортовано {len(df_new)} студентів!")
+                        st.rerun()
+                    else:
+                        st.error("Файл повинен містити колонки 'full_name' та 'group_name'")
+                except Exception as e:
+                    st.error(f"Помилка: {e}")
+
         with t3:
-            if st.session_state['role'] in ['admin', 'dean']:
-                ids = pd.read_sql("SELECT id, full_name FROM students", conn)
-                s_del = st.selectbox("Студент", ids.apply(lambda x: f"{x['id']}: {x['full_name']}", axis=1))
-                if st.button("Видалити"):
-                    sid = int(s_del.split(":")[0])
-                    conn.execute("DELETE FROM students WHERE id=?", (sid,))
-                    conn.commit()
-                    st.success("Видалено")
+            if not display_df.empty:
+                # Створюємо список для вибору (ID + Ім'я)
+                delete_options = display_df.apply(lambda x: f"{x['id']} | {x['full_name']}", axis=1).tolist()
+                to_delete = st.selectbox("Оберіть студента для видалення", delete_options)
+                
+                if st.button("❌ Видалити остаточно", type="primary"):
+                    sel_id = int(to_delete.split(" | ")[0])
+                    # Залишаємо всіх, крім обраного
+                    updated_df = df[df['id'] != sel_id]
+                    update_sheet("students", updated_df)
+                    
+                    log_action(st.session_state['full_name'], "Delete Student", f"Видалено ID: {sel_id}")
+                    st.warning("Дані видалено.")
                     st.rerun()
+            else:
+                st.info("Немає студентів для видалення у вибраному фільтрі.")
 
 import streamlit as st
 
