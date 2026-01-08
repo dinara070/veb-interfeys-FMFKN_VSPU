@@ -9,8 +9,14 @@ import altair as alt
 import re
 import sqlite3
 
-# Ініціалізація контролера кукі
-controller = CookieController()
+# Ініціалізація контролера кукі з обробкою помилок
+if 'controller' not in st.session_state:
+    try:
+        st.session_state.controller = CookieController()
+    except Exception as e:
+        st.error(f"Помилка ініціалізації контролера Cookies: {e}")
+
+controller = st.session_state.get('controller')
 
 # --- КОНФІГУРАЦІЯ ТА ПОСИЛАННЯ ---
 # ВСТАВТЕ ВАШЕ ПОСИЛАННЯ СЮДИ
@@ -69,10 +75,10 @@ def check_hashes(password, hashed_text):
     return make_hashes(password) == hashed_text
 
 def log_action(user_name, action, details):
-    """Логування дій прямо в Google Sheets"""
+    """Логування дій у Google Sheets"""
     ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     try:
-        # Використовуємо функцію append_row для збереження логу
+        # Використовуємо єдину назву функції append_row
         append_row("system_logs", {
             "user": user_name, 
             "action": action, 
@@ -80,7 +86,23 @@ def log_action(user_name, action, details):
             "timestamp": ts
         })
     except Exception as e:
-        st.warning(f"Помилка логування: {e}")
+        st.warning(f"Не вдалося записати лог: {e}")
+
+def perform_login(user):
+    """Авторизація та збереження даних"""
+    st.session_state['logged_in'] = True
+    st.session_state['username'] = user['username']
+    st.session_state['role'] = user['role']
+    st.session_state['full_name'] = user['full_name']
+    st.session_state['group'] = user.get('group_link', 'Staff')
+    
+    # Зберігаємо логін у кукі браузера
+    if controller:
+        controller.set('remember_user', user['username']) 
+    
+    log_action(user['full_name'], "Login", "Вхід у систему (Cloud)")
+    st.success(f"Вітаємо, {user['full_name']}!")
+    st.rerun()
 
 def perform_login(user):
     """Авторизація користувача та збереження даних у Session State та Cookies"""
@@ -259,6 +281,8 @@ def make_hashes(password):
     return hashlib.sha256(str.encode(password)).hexdigest()
 
 def create_connection():
+    """Створює підключення до локальної SQLite БД"""
+    # check_same_thread=False дозволяє Streamlit працювати з БД з різних потоків без збоїв
     return sqlite3.connect('university_v22.db', check_same_thread=False)
 
 def log_action(user, action, details):
