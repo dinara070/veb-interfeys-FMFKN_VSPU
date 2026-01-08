@@ -1,6 +1,6 @@
 import streamlit as st
+from streamlit_gsheets import GSheetsConnection
 from streamlit_cookies_controller import CookieController
-import sqlite3
 import pandas as pd
 import hashlib
 from datetime import datetime
@@ -8,51 +8,86 @@ import io
 import altair as alt
 import re
 
-# Ініціалізація контролера кукі (для збереження логіна на роки)
+# Ініціалізація контролера кукі
 controller = CookieController()
 
-# --- КОНФІГУРАЦІЯ СТОРІНКИ ---
-st.set_page_config(page_title="ФМФКН - Деканат", layout="wide", page_icon="🎓")
+# --- КОНФІГУРАЦІЯ ТА ПОСИЛАННЯ ---
+# ВСТАВТЕ ВАШЕ ПОСИЛАННЯ СЮДИ
+SPREADSHEET_URL = "https://docs.google.com/spreadsheets/d/1PRSI150082txAU7fjscbdTvlUtSTj1t5nonYpdEPWQk/edit?usp=sharing"
 
-# --- БАЗОВІ ФУНКЦІЇ БД ТА БЕЗПЕКИ ---
-def create_connection():
-    # Файл БД зберігається локально. Дані в ньому зберігаються вічно, поки файл існує.
-    return sqlite3.connect('university_v22.db', check_same_thread=False)
+st.set_page_config(page_title="ФМФКН - Деканат (Cloud)", layout="wide", page_icon="🎓")
+
+# --- НОВІ ФУНКЦІЇ ДЛЯ GOOGLE SHEETS ---
+
+def get_connection():
+    """Створює підключення до Google Sheets"""
+    return st.connection("gsheets", type=GSheetsConnection)
+
+def read_sheet(sheet_name):
+    """Читає конкретний аркуш таблиці"""
+    conn = get_connection()
+    return conn.read(spreadsheet=SPREADSHEET_URL, worksheet=sheet_name, ttl=0)
+
+def update_sheet(sheet_name, df):
+    """Оновлює аркуш повністю новими даними"""
+    conn = get_connection()
+    conn.update(spreadsheet=SPREADSHEET_URL, worksheet=sheet_name, data=df)
+
+def append_to_sheet(sheet_name, new_row_dict):
+    """Додає один рядок у кінець аркуша"""
+    df = read_sheet(sheet_name)
+    new_df = pd.concat([df, pd.DataFrame([new_row_dict])], ignore_index=True)
+    update_sheet(sheet_name, new_df)
+
+# --- БЕЗПЕКА ТА АВТОРИЗАЦІЯ (Cloud Version) ---
 
 def make_hashes(password):
+    """Шифрування пароля"""
     return hashlib.sha256(str.encode(password)).hexdigest()
 
 def check_hashes(password, hashed_text):
+    """Перевірка пароля"""
     return make_hashes(password) == hashed_text
 
-def perform_login(user):
-    """Авторизація та збереження логіна в браузері користувача"""
-    st.session_state['logged_in'] = True
-    st.session_state['username'] = user[0]
-    st.session_state['role'] = user[2]
-    st.session_state['full_name'] = user[3]
-    st.session_state['group'] = user[4]
-    
-    # Зберігаємо username в кукі. Навіть через рік браузер його пам'ятатиме.
-    controller.set('remember_user', user[0]) 
-    
-    # Логування входу
+def log_action(user_name, action, details):
+    """Логування дій прямо в Google Sheets"""
     ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    conn = create_connection()
-    conn.execute("INSERT INTO system_logs (user, action, details, timestamp) VALUES (?,?,?,?)", 
-                 (user[3], "Login", "Вхід у систему", ts))
-    conn.commit()
-    
-    st.success(f"Вітаємо, {user[3]}!")
-    st.rerun()
+    # Тепер ми використовуємо нову функцію append_to_sheet замість SQL INSERT
+    append_to_sheet("system_logs", {
+        "user": user_name, 
+        "action": action, 
+        "details": details, 
+        "timestamp": ts
+    })
 
-# --- ЛОГІКА ТЕМИ ---
+def perform_login(user):
+    """Авторизація та збереження даних (замість SQLite використовуємо Sheets лог)"""
+    st.session_state['logged_in'] = True
+    st.session_state['username'] = user['username']
+    st.session_state['role'] = user['role']
+    st.session_state['full_name'] = user['full_name']
+    st.session_state['group'] = user['group_link']
+    
+    # Зберігаємо логін у кукі браузера
+    controller.set('remember_user', user['username']) 
+    
+    # Логування входу в таблицю system_logs у Google Sheets
+    log_action(user['full_name'], "Login", "Вхід у систему (Cloud)")
+    
+    st.success(f"Вітаємо, {user['full_name']}!")
+    st.rerun()
+    
+# --- ЛОГІКА ТЕМИ ТА СТИЛІЗАЦІЯ ---
+
+# Ініціалізація теми у стані сесії
 if 'theme' not in st.session_state:
     st.session_state.theme = 'light'
 
 def toggle_theme():
+    """Функція для зміни теми"""
     st.session_state.theme = 'dark' if st.session_state.theme == 'light' else 'light'
 
+# ПОВНІ НАЛАШТУВАННЯ ТЕМНОЇ ТЕМИ
 dark_css = """
 <style>
     .stApp { background-color: #0E1117; color: #FFFFFF; }
@@ -69,6 +104,7 @@ dark_css = """
 </style>
 """
 
+# ПОВНІ НАЛАШТУВАННЯ СВІТЛОЇ ТЕМИ
 light_css = """
 <style>
     .stApp { background-color: #FFFFFF; color: #000000; }
@@ -85,7 +121,7 @@ light_css = """
 </style>
 """
 
-# Застосування стилю
+# Автоматичне застосування обраного стилю при кожному оновленні сторінки
 if st.session_state.theme == 'dark':
     st.markdown(dark_css, unsafe_allow_html=True)
 else:
@@ -336,7 +372,7 @@ def perform_login(user):
 # --- СТОРІНКИ ---
 
 def login_register_page():
-    """Оновлена сторінка входу та реєстрації з тривалим збереженням даних"""
+    """Сторінка входу та реєстрації з використанням Google Sheets"""
     col1, col2, col3 = st.columns([1, 2, 1])
     
     with col2:
@@ -345,18 +381,18 @@ def login_register_page():
         # Вибір режиму: Вхід або Реєстрація через вкладки
         mode = st.tabs(["🔐 Увійти", "📝 Реєстрація"])
         
-        conn = create_connection()
-        c = conn.cursor()
+        # Завантажуємо актуальний список користувачів з Google Sheets
+        users_df = read_sheet("users")
 
         # --- ВКЛАДКА ВХОДУ ---
         with mode[0]:
-            # Читаємо збережений логін з кукі браузера (ключ remember_user)
+            # Читаємо збережений логін з кукі браузера
             saved_username = controller.get('remember_user')
             
-            username = st.text_input("Ім'я користувача (Username):", value=saved_username if saved_username else "", key="login_user")
+            username = st.text_input("Логін (Username):", value=saved_username if saved_username else "", key="login_user")
             password = st.text_input("Пароль:", type='password', key="login_pass")
             
-            # Блок Капчі (цифровий код підтвердження)
+            # Блок Капчі (залишаємо для безпеки)
             st.divider()
             captcha_val = "56388"
             st.markdown(f"**Код підтвердження:**")
@@ -365,123 +401,180 @@ def login_register_page():
             
             if st.button("Увійти в систему", use_container_width=True):
                 if user_captcha != captcha_val:
-                    st.error("❌ Невірний код підтвердження. Спробуйте ще раз.")
+                    st.error("❌ Невірний код підтвердження.")
                 elif username and password:
-                    hashed_input = make_hashes(password)
-                    c.execute('SELECT * FROM users WHERE username=? AND password=?', (username, hashed_input))
-                    user = c.fetchone()
-                    if user:
-                        perform_login(user)
+                    if not users_df.empty:
+                        hashed_input = make_hashes(password)
+                        # Пошук користувача в DataFrame
+                        user_match = users_df[(users_df['username'] == username) & (users_df['password'] == hashed_input)]
+                        
+                        if not user_match.empty:
+                            # Отримуємо дані першого знайденого користувача
+                            user_data = user_match.iloc[0]
+                            # Викликаємо функцію авторизації (вже адаптовану під словник/Series)
+                            perform_login(user_data)
+                        else:
+                            st.error("❌ Користувача не знайдено або пароль невірний.")
                     else:
-                        st.error("❌ Користувача не знайдено або пароль невірний. Перевірте дані.")
+                        st.warning("⚠️ База користувачів порожня. Будь ласка, зареєструйтесь.")
                 else:
-                    st.warning("⚠️ Будь ласка, заповніть усі поля для входу.")
+                    st.warning("⚠️ Заповніть усі поля для входу.")
 
         # --- ВКЛАДКА РЕЄСТРАЦІЇ ---
         with mode[1]:
             st.markdown("### Первинна реєстрація")
-            st.info("Ви реєструєтесь один раз. Після цього ваш акаунт буде зберігатися в базі постійно.")
+            st.info("Після реєстрації ваші дані будуть надійно збережені в хмарі Google Sheets.")
             
             new_user = st.text_input("Придумайте унікальний логін:", key="reg_user_new")
             new_pass = st.text_input("Придумайте надійний пароль:", type='password', key="reg_pass_new")
-            full_name = st.text_input("Ваше повне ПІБ (напр. Іванов Іван Іванович):", key="reg_full_name")
+            full_name = st.text_input("Ваше повне ПІБ:", key="reg_full_name")
             role_choice = st.selectbox("Оберіть вашу посаду:", ROLES_LIST, key="reg_role_select")
 
             if st.button("Створити обліковий запис", use_container_width=True):
                 if new_user and new_pass and full_name:
-                    try:
-                        hashed_pw = make_hashes(new_pass)
-                        # Записуємо в базу даних. Ці дані залишаться в файлі .db
-                        c.execute('INSERT INTO users (username, password, role, full_name, group_link) VALUES (?,?,?,?,?)', 
-                                  (new_user, hashed_pw, role_choice, full_name, "Staff"))
-                        conn.commit()
+                    # Перевірка, чи не зайнятий логін
+                    is_taken = False
+                    if not users_df.empty:
+                        is_taken = new_user in users_df['username'].values
+                    
+                    if is_taken:
+                        st.error("⚠️ Цей логін вже зайнятий. Оберіть інший.")
+                    else:
+                        # Додаємо нового користувача в Google Sheets
+                        new_user_data = {
+                            "username": new_user,
+                            "password": make_hashes(new_pass),
+                            "role": role_choice,
+                            "full_name": full_name,
+                            "group_link": "Staff"
+                        }
+                        append_row("users", new_user_data)
                         
-                        # Зберігаємо логін в кукі, щоб поле 'Username' у вкладці входу заповнилося автоматично
+                        # Зберігаємо логін в кукі для зручності
                         controller.set('remember_user', new_user)
                         
-                        st.success("🎉 Реєстрація успішна! Ваш акаунт створено та внесено в базу.")
-                        st.info("Тепер просто перейдіть на вкладку **'🔐 Увійти'** — ваш логін вже підставлено.")
+                        st.success("🎉 Реєстрація успішна! Дані збережено в хмарі.")
+                        st.info("Тепер перейдіть на вкладку **'🔐 Увійти'**.")
                         st.balloons()
-                    except sqlite3.IntegrityError:
-                        st.error("⚠️ Цей логін вже зайнятий. Будь ласка, оберіть інший.")
                 else:
-                    st.warning("⚠️ Для реєстрації необхідно заповнити всі доступні поля.")
+                    st.warning("⚠️ Для реєстрації необхідно заповнити всі поля.")
 
 def main_panel():
-    st.title("🏠 Головна панель")
+    st.title("🏠 Головна панель (Cloud)")
     st.markdown(f"### Вітаємо, {st.session_state['full_name']}!")
-    conn = create_connection()
+    
+    # --- ЗАВАНТАЖЕННЯ ДАНИХ З GOOGLE SHEETS ---
+    # Ми завантажуємо таблиці один раз для розрахунку аналітики
+    students_df = read_sheet("students")
+    grades_df = read_sheet("grades")
+    attendance_df = read_sheet("attendance")
+    news_df = read_sheet("news")
+    # Для file_storage (якщо ви залишили аркуш для посилань)
+    files_df = read_sheet("file_storage") 
 
     st.divider()
     st.subheader("📊 Аналітика та Статистика")
     kpi1, kpi2, kpi3 = st.columns(3)
     
+    # 1. Метрика студентів
     if st.session_state['role'] in ['student', 'starosta']:
         my_group = st.session_state['group']
-        group_count = pd.read_sql_query(f"SELECT count(*) FROM students WHERE group_name='{my_group}'", conn).iloc[0,0]
+        group_count = len(students_df[students_df['group_name'] == my_group]) if not students_df.empty else 0
         kpi1.metric("Моя група", f"{group_count} студ.")
     else:
-        total_students = pd.read_sql_query("SELECT count(*) FROM students", conn).iloc[0,0]
+        total_students = len(students_df) if not students_df.empty else 0
         kpi1.metric("Всього студентів", total_students)
 
-    file_count = pd.read_sql_query("SELECT count(*) FROM file_storage", conn).iloc[0,0]
+    # 2. Метрика матеріалів
+    file_count = len(files_df) if not files_df.empty else 0
     kpi2.metric("Завантажено матеріалів", file_count)
 
-    if st.session_state['role'] in ['student', 'starosta']:
-        avg_q = f"SELECT avg(grade) FROM grades WHERE student_name='{st.session_state['full_name']}'"
+    # 3. Метрика середнього балу
+    if not grades_df.empty:
+        if st.session_state['role'] in ['student', 'starosta']:
+            user_grades = grades_df[grades_df['student_name'] == st.session_state['full_name']]
+            avg_val = user_grades['grade'].mean()
+        else:
+            avg_val = grades_df['grade'].mean()
+        avg_val = round(avg_val, 1) if pd.notnull(avg_val) else 0
     else:
-        avg_q = "SELECT avg(grade) FROM grades"
-    avg_val = pd.read_sql_query(avg_q, conn).iloc[0,0]
-    avg_val = round(avg_val, 1) if avg_val else 0
+        avg_val = 0
     kpi3.metric("Середній бал", avg_val)
 
+    # --- ГРАФІКИ ---
     col_chart1, col_chart2 = st.columns(2)
+    
     with col_chart1:
         st.markdown("**📈 Успішність (Середній бал)**")
-        if st.session_state['role'] in ['student', 'starosta']:
-            query_chart = f"SELECT subject, avg(grade) as avg_grade FROM grades WHERE student_name='{st.session_state['full_name']}' GROUP BY subject"
+        if not grades_df.empty:
+            if st.session_state['role'] in ['student', 'starosta']:
+                chart_data = grades_df[grades_df['student_name'] == st.session_state['full_name']]
+            else:
+                chart_data = grades_df
+            
+            # Групування через Pandas (замість SQL GROUP BY)
+            subj_avg = chart_data.groupby('subject')['grade'].mean().reset_index()
+            st.bar_chart(subj_avg.set_index('subject'))
         else:
-            query_chart = "SELECT subject, avg(grade) as avg_grade FROM grades GROUP BY subject"
-        df_chart = pd.read_sql_query(query_chart, conn)
-        if not df_chart.empty: st.bar_chart(df_chart.set_index('subject'))
-        else: st.info("Наразі дані не завантажені.")
+            st.info("Дані про оцінки відсутні.")
 
     with col_chart2:
         st.markdown("**📉 Відвідуваність**")
-        q_att = f"SELECT status FROM attendance WHERE student_name='{st.session_state['full_name']}'" if st.session_state['role'] in ['student', 'starosta'] else "SELECT status FROM attendance"
-        df_att = pd.read_sql_query(q_att, conn)
-        if not df_att.empty:
-            absent_count = df_att[df_att['status'] != ''].shape[0] 
-            present_count = df_att[df_att['status'] == ''].shape[0] 
-            att_data = pd.DataFrame({'Статус': ['Присутній', 'Відсутній/Інше'], 'Кількість': [present_count, absent_count]})
-            base = alt.Chart(att_data).encode(theta=alt.Theta("Кількість", stack=True))
-            pie = base.mark_arc(outerRadius=120).encode(color=alt.Color("Статус"), order=alt.Order("Кількість", sort="descending"), tooltip=["Статус", "Кількість"])
+        if not attendance_df.empty:
+            if st.session_state['role'] in ['student', 'starosta']:
+                att_data = attendance_df[attendance_df['student_name'] == st.session_state['full_name']]
+            else:
+                att_data = attendance_df
+            
+            # Рахуємо статуси (н - відсутній, інші - присутній)
+            absent_count = len(att_data[att_data['status'] == 'н'])
+            present_count = len(att_data[att_data['status'] != 'н'])
+            
+            pie_df = pd.DataFrame({
+                'Статус': ['Присутній', 'Відсутній'], 
+                'Кількість': [present_count, absent_count]
+            })
+            
+            base = alt.Chart(pie_df).encode(theta=alt.Theta("Кількість", stack=True))
+            pie = base.mark_arc(outerRadius=100).encode(
+                color=alt.Color("Статус"), 
+                tooltip=["Статус", "Кількість"]
+            )
             st.altair_chart(pie, use_container_width=True)
-        else: st.info("Наразі дані не завантажені.")
+        else:
+            st.info("Дані про відвідуваність відсутні.")
 
     st.divider()
     st.subheader("📢 Оголошення та Новини")
+    
+    # Форма додавання новин (тільки для викладачів/адмінів)
     if st.session_state['role'] in TEACHER_LEVEL:
         with st.expander("📝 Додати нове оголошення"):
-            with st.form("news_form"):
+            with st.form("news_form_cloud"):
                 n_title = st.text_input("Заголовок новини")
                 n_msg = st.text_area("Текст оголошення")
                 if st.form_submit_button("Опублікувати"):
                     if n_title and n_msg:
-                        c = conn.cursor()
-                        date_pub = datetime.now().strftime("%Y-%m-%d %H:%M")
-                        c.execute("INSERT INTO news (title, message, author, date) VALUES (?,?,?,?)", (n_title, n_msg, st.session_state['full_name'], date_pub))
-                        conn.commit()
-                        st.success("Новину опубліковано!")
+                        new_news = {
+                            "title": n_title,
+                            "message": n_msg,
+                            "author": st.session_state['full_name'],
+                            "date": datetime.now().strftime("%Y-%m-%d %H:%M")
+                        }
+                        append_row("news", new_news)
+                        st.success("Новину збережено в Google Sheets!")
                         st.rerun()
-    news_df = pd.read_sql_query("SELECT title, message, author, date FROM news ORDER BY id DESC", conn)
+
+    # Відображення новин
     if not news_df.empty:
-        for i, row in news_df.iterrows():
+        # Сортуємо: нові зверху
+        for _, row in news_df.iloc[::-1].iterrows():
             with st.container(border=True):
                 st.markdown(f"### {row['title']}")
                 st.write(row['message'])
                 st.caption(f"🗓️ {row['date']} | ✍️ {row['author']}")
-    else: st.info("Наразі немає актуальних оголошень.")
+    else:
+        st.info("Наразі немає актуальних оголошень.")
 
 def students_groups_view():
     st.title("👥 Студенти та Групи")
@@ -812,97 +905,163 @@ import io
 import streamlit as st
 
 def gradebook_view():
-    st.title("💯 Журнал Оцінок")
-    conn = create_connection()
-    c = conn.cursor()
-
-    if st.session_state['role'] in ['student', 'starosta']:
-        df = pd.read_sql(f"SELECT subject, type_of_work, grade, date FROM grades WHERE student_name='{st.session_state['full_name']}'", conn)
-        st.dataframe(df, use_container_width=True)
+    st.title("💯 Журнал Оцінок (Google Sheets)")
     
+    # Завантажуємо дані
+    grades_df = read_sheet("grades")
+    students_df = read_sheet("students")
+    
+    if students_df.empty:
+        st.error("База студентів порожня. Додайте студентів у відповідній вкладці.")
+        return
+
+    # --- ЛОГІКА ДЛЯ СТУДЕНТА / СТАРОСТИ ---
+    if st.session_state['role'] in ['student', 'starosta']:
+        st.subheader(f"Оцінки студента: {st.session_state['full_name']}")
+        if not grades_df.empty:
+            user_grades = grades_df[grades_df['student_name'] == st.session_state['full_name']]
+            if not user_grades.empty:
+                st.dataframe(user_grades[['subject', 'type_of_work', 'grade', 'date']], use_container_width=True)
+            else:
+                st.info("У вас поки немає виставлених оцінок.")
+        else:
+            st.info("Журнал порожній.")
+    
+    # --- ЛОГІКА ДЛЯ АДМІНІСТРАТОРА / ДЕКАНАТУ ---
     else:
-        t_journal, t_ops = st.tabs(["Журнал", "📥/📤 Операції"])
+        t_journal, t_ops = st.tabs(["📊 Журнал", "📥/📤 Операції (Імпорт/Експорт)"])
         
-        # --- ФІЛЬТРИ ---
+        # Фільтри
         c1, c2, c3 = st.columns(3)
-        grp = c1.selectbox("Група", list(GROUPS_DATA.keys()))
+        all_groups = sorted(students_df['group_name'].unique().tolist())
+        grp = c1.selectbox("Група", all_groups)
         
-        stds_df = pd.read_sql(f"SELECT full_name FROM students WHERE group_name='{grp}'", conn)
-        students_in_group = stds_df['full_name'].tolist() if not stds_df.empty else []
-        selected_student = c2.selectbox("Студент", ["Всі студенти"] + students_in_group)
-        
+        st_in_grp = students_df[students_df['group_name'] == grp]['full_name'].tolist()
+        selected_student = c2.selectbox("Студент", ["Всі студенти"] + st_in_grp)
         subj = c3.selectbox("Предмет", SUBJECTS_LIST)
 
         with t_journal:
-            with st.expander("➕ Додати колонку"):
-                with st.form("new_col"):
-                    nm = st.text_input("Назва")
-                    dt = st.date_input("Дата")
-                    if st.form_submit_button("Створити"):
-                        if nm and students_in_group:
-                            for s in students_in_group:
-                                c.execute("INSERT INTO grades (student_name, group_name, subject, type_of_work, grade, date) VALUES (?,?,?,?,?,?)", 
-                                         (s, grp, subj, nm, 0, str(dt)))
-                            conn.commit()
+            with st.expander("➕ Додати колонку (тип роботи)"):
+                with st.form("new_col_cloud"):
+                    work_name = st.text_input("Назва (напр. Модуль 1, Лаб 2)")
+                    exam_date = st.date_input("Дата")
+                    if st.form_submit_button("Створити для всієї групи"):
+                        if work_name:
+                            new_rows = []
+                            for s in st_in_grp:
+                                new_rows.append({
+                                    "student_name": s, "group_name": grp, "subject": subj,
+                                    "type_of_work": work_name, "grade": 0, "date": str(exam_date)
+                                })
+                            # Додаємо нові порожні записи до загального DF
+                            updated_grades = pd.concat([grades_df, pd.DataFrame(new_rows)], ignore_index=True)
+                            save_sheet("grades", updated_grades)
+                            st.success(f"Колонку '{work_name}' додано!")
                             st.rerun()
-                        else:
-                            st.warning("Перевірте назву або наявність студентів у групі.")
 
-            query = f"SELECT student_name, type_of_work, grade FROM grades WHERE group_name='{grp}' AND subject='{subj}'"
+            # Фільтруємо дані для відображення
+            mask = (grades_df['group_name'] == grp) & (grades_df['subject'] == subj)
             if selected_student != "Всі студенти":
-                query += f" AND student_name='{selected_student}'"
+                mask = mask & (grades_df['student_name'] == selected_student)
+            
+            raw_filtered = grades_df[mask]
 
-            raw = pd.read_sql(query, conn)
-
-            # --- ЛОГІКА ВІДОБРАЖЕННЯ ТА РЕДАГУВАННЯ ---
-            if not raw.empty:
-                matrix = raw.pivot_table(index='student_name', columns='type_of_work', values='grade', aggfunc='first').fillna(0)
+            if not raw_filtered.empty:
+                # Створюємо матрицю для зручного введення
+                matrix = raw_filtered.pivot(index='student_name', columns='type_of_work', values='grade').fillna(0)
                 
-                if st.session_state['role'] == 'tech_admin':
-                    st.info("ℹ️ Режим перегляду для Технічного адміністратора. Збереження недоступне.")
-                    st.dataframe(matrix, use_container_width=True) # Просто перегляд
+                st.write(f"**Редагування оцінок: {grp} — {subj}**")
+                edited_matrix = st.data_editor(matrix, use_container_width=True)
                 
-                else:
-                    edited = st.data_editor(matrix, use_container_width=True)
-                    if st.button("Зберегти зміни"):
-                        for s_name, row in edited.iterrows():
-                            for w_name, val in row.items():
-                                c.execute("UPDATE grades SET grade=? WHERE student_name=? AND subject=? AND type_of_work=?", 
-                                         (val, s_name, subj, w_name))
-                        conn.commit()
-                        st.success("Дані оновлено!")
-            else: 
-                st.info("Даних немає. Додайте колонку.")
+                if st.button("💾 Зберегти зміни в Google Sheets"):
+                    # Логіка оновлення: 
+                    # 1. Видаляємо старі записи для цієї групи/предмета
+                    non_target_grades = grades_df[~((grades_df['group_name'] == grp) & (grades_df['subject'] == subj))]
+                    
+                    # 2. Перетворюємо змінену матрицю назад у довгий список
+                    updated_list = []
+                    for s_name, row in edited_matrix.iterrows():
+                        for w_type, val in row.items():
+                            updated_list.append({
+                                "student_name": s_name, "group_name": grp, "subject": subj,
+                                "type_of_work": w_type, "grade": val, "date": str(datetime.now().date())
+                            })
+                    
+                    # 3. З'єднуємо і зберігаємо
+                    final_grades = pd.concat([non_target_grades, pd.DataFrame(updated_list)], ignore_index=True)
+                    save_sheet("grades", final_grades)
+                    st.success("Дані успішно синхронізовано з хмарою!")
+            else:
+                st.info("Даних немає. Додайте першу колонку вище.")
 
-        # --- ВКЛАДКА ОПЕРАЦІЙ (Експорт/Імпорт) ---
         with t_ops:
-            st.subheader("📤 Експорт")
-            raw_export = pd.read_sql(f"SELECT * FROM grades WHERE group_name='{grp}' AND subject='{subj}'", conn)
-            
-            col_ex1, col_ex2 = st.columns(2)
-            csv_data = raw_export.to_csv(index=False).encode('utf-8-sig')
-            col_ex1.download_button("📄 Експорт CSV", csv_data, "grades.csv", "text/csv")
-            
-            try:
+            st.subheader("📤 Експорт поточної групи")
+            if not raw_filtered.empty:
+                c_ex1, c_ex2 = st.columns(2)
+                csv = raw_filtered.to_csv(index=False).encode('utf-8-sig')
+                c_ex1.download_button("⬇️ Завантажити CSV", csv, f"grades_{grp}_{subj}.csv", "text/csv")
+                
                 buffer = io.BytesIO()
                 with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
-                    raw_export.to_excel(writer, index=False)
-                col_ex2.download_button("📊 Експорт Excel", buffer.getvalue(), "grades.xlsx")
-            except Exception:
-                col_ex2.info("Excel тимчасово недоступний (використовуйте CSV)")
-
-            st.divider()
-            st.subheader("📥 Імпорт")
-            up_file = st.file_uploader("Оберіть файл (CSV або XLSX)", type=["csv", "xlsx"])
+                    raw_filtered.to_excel(writer, index=False)
+                c_ex2.download_button("⬇️ Завантажити Excel", buffer.getvalue(), f"grades_{grp}_{subj}.xlsx")
             
-            if up_file and st.button("🚀 Виконати імпорт"):
+            st.divider()
+            st.subheader("📥 Масовий імпорт")
+            up_file = st.file_uploader("Завантажте файл (має містити всі колонки таблиці grades)", type=["csv", "xlsx"])
+            if up_file and st.button("🚀 Запустити імпорт"):
                 try:
                     df_new = pd.read_csv(up_file) if up_file.name.endswith('.csv') else pd.read_excel(up_file)
-                    df_new.to_sql('grades', conn, if_exists='append', index=False)
-                    st.success("Успішно імпортовано!")
+                    combined = pd.concat([grades_df, df_new], ignore_index=True)
+                    save_sheet("grades", combined)
+                    st.success("Імпортовано успішно!")
                     st.rerun()
                 except Exception as e:
-                    st.error(f"Помилка імпорту: {e}")
+                    st.error(f"Помилка формату: {e}")
+
+def students_view():
+    st.title("👥 Управління контингентом студентів")
+    df_st = read_sheet("students")
+    
+    # Фільтрація для перегляду
+    all_grps = ["Всі"] + (sorted(df_st['group_name'].unique().tolist()) if not df_st.empty else [])
+    sel_grp = st.selectbox("Фільтр списку за групою:", all_grps)
+    
+    display_df = df_st.copy()
+    if sel_grp != "Всі":
+        display_df = display_df[display_df['group_name'] == sel_grp]
+        
+    st.dataframe(display_df, use_container_width=True)
+
+    # Функції адміністрування (лише для Декана/Адміна)
+    if st.session_state['role'] in ['dean', 'admin']:
+        st.divider()
+        st.subheader("🛠️ Інструменти адміністратора")
+        
+        tab_add, tab_del = st.tabs(["➕ Додати", "🗑️ Видалити"])
+        
+        with tab_add:
+            with st.form("add_student_cloud"):
+                c1, c2 = st.columns(2)
+                new_name = c1.text_input("ПІБ студента")
+                new_group = c2.text_input("Група (напр. 1СОМ)")
+                if st.form_submit_button("Зберегти в базу"):
+                    if new_name and new_group:
+                        new_id = int(df_st['id'].max() + 1) if not df_st.empty else 1
+                        append_row("students", {"id": new_id, "full_name": new_name, "group_name": new_group})
+                        log_action(st.session_state['full_name'], "Add Student", f"Додано: {new_name}")
+                        st.success("Студента додано!")
+                        st.rerun()
+        
+        with tab_del:
+            if not df_st.empty:
+                st_to_del = st.selectbox("Оберіть студента для видалення", df_st['full_name'].tolist())
+                if st.button("❌ Видалити остаточно"):
+                    updated_st = df_st[df_st['full_name'] != st_to_del]
+                    save_sheet("students", updated_st)
+                    log_action(st.session_state['full_name'], "Delete Student", f"Видалено: {st_to_del}")
+                    st.warning(f"Студента {st_to_del} видалено")
+                    st.rerun()
 
 import io
 import pandas as pd
