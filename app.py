@@ -1414,7 +1414,7 @@ def deanery_modules_view():
             else:
                 st.info("Контрактів ще не додано.")
 
-# --- НОВИЙ МОДУЛЬ: СЕСІЯ ТА РУХ КОНТИНГЕНТУ ---
+# --- МОДУЛЬ: СЕСІЯ ТА РУХ КОНТИНГЕНТУ ---
 def session_module_view():
     st.title("Сесія та Рух контингенту")
     if st.session_state['role'] not in DEAN_LEVEL:
