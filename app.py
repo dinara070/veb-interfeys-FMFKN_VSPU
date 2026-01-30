@@ -8,6 +8,28 @@ import io
 import altair as alt
 import re
 
+TABLES = {
+    "students": "tables/студенти.xlsx",
+    "users": "tables/користувачі.xlsx",
+    "grades": "tables/оцінки.xlsx",
+    "attendance": "tables/відвідуваність.xlsx",
+    "schedule": "tables/розклад.xlsx",
+    "dormitory": "tables/гуртожиток.xlsx",
+    "scholarship": "tables/стипендія.xlsx",
+    "logs": "tables/системні_логи.xlsx"
+}
+
+def load_data(table_key):
+    path = TABLES.get(table_key)
+    if path and os.path.exists(path):
+        return pd.read_excel(path)
+    return pd.DataFrame()
+
+def save_data(df, table_key):
+    path = TABLES.get(table_key)
+    if path:
+        df.to_excel(path, index=False)
+
 # Ініціалізація контролера кукі (для збереження логіна на роки)
 controller = CookieController()
 
@@ -467,51 +489,93 @@ def main_panel():
 
 def students_groups_view():
     st.title("👥 Студенти та Групи")
-    conn = create_connection()
-    all_groups = ["Всі"] + list(GROUPS_DATA.keys())
-    selected_group = st.selectbox("Фільтр по групі:", all_groups)
-    query = "SELECT id, full_name as 'ПІБ', group_name as 'Група' FROM students"
-    if selected_group != "Всі": query += f" WHERE group_name='{selected_group}'"
-    df = pd.read_sql_query(query, conn)
-    csv = convert_df_to_csv(df)
-    st.download_button("⬇️ Експортувати (CSV)", csv, "students.csv", "text/csv")
-    st.dataframe(df, use_container_width=True)
+    
+    # 1. Завантажуємо дані з Excel
+    df_all = load_data("students")
+    
+    if df_all.empty:
+        st.warning("Список студентів порожній або файл не знайдено.")
+        # Створимо порожню структуру, щоб адмін міг додати першого студента
+        df_all = pd.DataFrame(columns=['full_name', 'group_name'])
 
-    if st.session_state['role'] in DEAN_LEVEL:
+    # 2. Фільтрація
+    # Використовуємо GROUPS_DATA для списку груп або унікальні значення з файлу
+    available_groups = ["Всі"] + list(GROUPS_DATA.keys())
+    selected_group = st.selectbox("Фільтр по групі:", available_groups)
+
+    df_display = df_all.copy()
+    if selected_group != "Всі":
+        df_display = df_display[df_display['group_name'] == selected_group]
+
+    # 3. Експорт та Відображення
+    st.write(f"Знайдено студентів: {len(df_display)}")
+    
+    csv = df_display.to_csv(index=False).encode('utf-8-sig')
+    st.download_button("⬇️ Експортувати (CSV)", csv, "students.csv", "text/csv")
+    
+    st.dataframe(df_display, use_container_width=True)
+
+    # 4. Блок Управління (тільки для Деканату/Адміна)
+    if st.session_state.get('role') in DEAN_LEVEL:
         st.divider()
         st.subheader("🛠️ Управління")
         t1, t2, t3 = st.tabs(["➕ Додати", "📥 Імпорт", "🗑️ Видалити"])
+        
         with t1:
             with st.form("add_s"):
                 nm = st.text_input("ПІБ")
                 gr = st.selectbox("Група", list(GROUPS_DATA.keys()))
                 if st.form_submit_button("Додати"):
-                    c = conn.cursor()
-                    c.execute('INSERT INTO students (full_name, group_name) VALUES (?,?)', (nm, gr))
-                    conn.commit()
-                    log_action(st.session_state['full_name'], "Add Student", f"Додано: {nm} в {gr}")
-                    st.success("Додано!")
-                    st.rerun()
+                    if nm:
+                        new_row = pd.DataFrame([{"full_name": nm, "group_name": gr}])
+                        df_updated = pd.concat([df_all, new_row], ignore_index=True)
+                        save_data(df_updated, "students")
+                        
+                        log_action(st.session_state['full_name'], "Add Student", f"Додано: {nm} в {gr}")
+                        st.success(f"Студента {nm} додано!")
+                        st.rerun()
+                    else:
+                        st.error("Введіть ПІБ студента")
+
         with t2:
             if st.session_state['role'] in ['admin', 'dean']:
-                f = st.file_uploader("CSV (full_name, group_name)", type="csv")
+                f = st.file_uploader("Завантажте файл (CSV або Excel)", type=["csv", "xlsx"])
                 if f:
                     try:
-                        df_new = pd.read_csv(f)
-                        df_new[['full_name', 'group_name']].to_sql('students', conn, if_exists='append', index=False)
-                        st.success("Імпортовано!")
+                        if f.name.endswith('.csv'):
+                            df_new = pd.read_csv(f)
+                        else:
+                            df_new = pd.read_excel(f)
+                        
+                        # Додаємо нові дані до існуючих
+                        df_updated = pd.concat([df_all, df_new[['full_name', 'group_name']]], ignore_index=True)
+                        save_data(df_updated, "students")
+                        
+                        st.success("Дані успішно імпортовано!")
                         st.rerun()
-                    except Exception as e: st.error(f"Помилка: {e}")
+                    except Exception as e: 
+                        st.error(f"Помилка імпорту: {e}")
+
         with t3:
             if st.session_state['role'] in ['admin', 'dean']:
-                ids = pd.read_sql("SELECT id, full_name FROM students", conn)
-                s_del = st.selectbox("Студент", ids.apply(lambda x: f"{x['id']}: {x['full_name']}", axis=1))
-                if st.button("Видалити"):
-                    sid = int(s_del.split(":")[0])
-                    conn.execute("DELETE FROM students WHERE id=?", (sid,))
-                    conn.commit()
-                    st.success("Видалено")
-                    st.rerun()
+                if not df_all.empty:
+                    # Створюємо список для вибору на основі індексів або ПІБ
+                    student_to_del = st.selectbox(
+                        "Оберіть студента для видалення:", 
+                        df_all.index, 
+                        format_func=lambda x: f"{df_all.loc[x, 'full_name']} ({df_all.loc[x, 'group_name']})"
+                    )
+                    
+                    if st.button("❌ Видалити студента"):
+                        name_del = df_all.loc[student_to_del, 'full_name']
+                        df_updated = df_all.drop(student_to_del)
+                        save_data(df_updated, "students")
+                        
+                        log_action(st.session_state['full_name'], "Delete Student", f"Видалено: {name_del}")
+                        st.success(f"Студента {name_del} видалено")
+                        st.rerun()
+                else:
+                    st.info("Список порожній, нікого видаляти.")
 
 import streamlit as st
 
@@ -1607,20 +1671,73 @@ def system_settings_view():
         st.download_button("⬇️ Завантажити лог (CSV)", convert_df_to_csv(logs_df), "system_logs.csv", "text/csv")
 
 
+def main_panel():
+    st.title("🏠 Головна панель")
+    st.markdown(f"### Вітаємо, {st.session_state.get('full_name', 'Користувач')}!")
+    
+    # Завантажуємо дані з Excel
+    df_students = load_data("students")
+    df_grades = load_data("grades")
+    df_files = load_data("file_storage")
+    df_news = load_data("news")
+
+    st.divider()
+    st.subheader("📊 Аналітика та Статистика")
+    kpi1, kpi2, kpi3 = st.columns(3)
+
+    # KPI 1: Кількість студентів
+    if st.session_state.get('role') in ['student', 'starosta']:
+        my_group = st.session_state.get('group', '')
+        group_count = len(df_students[df_students['group_name'] == my_group]) if not df_students.empty else 0
+        kpi1.metric("Моя група", f"{group_count} студ.")
+    else:
+        total_students = len(df_students) if not df_students.empty else 0
+        kpi1.metric("Всього студентів", total_students)
+
+    # KPI 2: Матеріали
+    file_count = len(df_files) if not df_files.empty else 0
+    kpi2.metric("Завантажено матеріалів", file_count)
+
+    # KPI 3: Середній бал
+    if not df_grades.empty:
+        if st.session_state.get('role') in ['student', 'starosta']:
+            user_grades = df_grades[df_grades['student_name'] == st.session_state.get('full_name')]
+            avg_val = user_grades['grade'].mean()
+        else:
+            avg_val = df_grades['grade'].mean()
+    else:
+        avg_val = 0
+        
+    avg_val = round(avg_val, 1) if pd.notnull(avg_val) else 0
+    kpi3.metric("Середній бал", avg_val)
+
+    st.divider()
+    st.subheader("📢 Останні новини")
+    if not df_news.empty:
+        # Показуємо останні 3 новини
+        for _, row in df_news.tail(3).iterrows():
+            with st.container(border=True):
+                st.markdown(f"**{row['title']}**")
+                st.write(row['message'])
+                st.caption(f"📅 {row['date']} | ✍️ {row['author']}")
+    else:
+        st.info("Актуальних оголошень поки немає.")
+
+# --- ОСНОВНА ФУНКЦІЯ ЗАПУСКУ ---
 def main():
+    # Ініціалізація БД (залишаємо для системних потреб, якщо треба)
     init_db()
 
     if 'logged_in' not in st.session_state:
         st.session_state['logged_in'] = False
 
-    # 3. ЛОГІКА ВІДОБРАЖЕННЯ: якщо не зайшли - показуємо вхід, якщо зайшли - робочу панель
     if not st.session_state['logged_in']:
         login_register_page()
     else:
         # --- БОКОВА ПАНЕЛЬ (SIDEBAR) ---
         st.sidebar.title(f"👤 {st.session_state.get('full_name', 'Користувач')}")
 
-        current_role = st.session_state.get('role', '').lower()
+        current_role = str(st.session_state.get('role', '')).lower()
         if current_role == 'student':
              st.sidebar.markdown("### 🛡️ СТУДЕНТ (READ ONLY)")
         elif current_role == 'tech_admin':
@@ -1649,6 +1766,7 @@ def main():
             "Файловий репозиторій": file_repository_view
         }
 
+        # Додаткові модулі для деканату та адміна
         if current_role in DEAN_LEVEL:
             menu_options["Модулі Деканату"] = deanery_modules_view
             menu_options["Сесія та Рух"] = session_module_view
@@ -1658,6 +1776,7 @@ def main():
 
         selection = st.sidebar.radio("Навігація", list(menu_options.keys()))
 
+        # Виклик обраної функції
         menu_options[selection]()
 
         st.sidebar.divider()
