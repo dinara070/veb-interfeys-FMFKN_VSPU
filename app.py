@@ -424,7 +424,7 @@ def main_panel():
         count = len(df_st[df_st['group_name'] == my_group]) if not df_st.empty else 0
         k1.metric("Моя група", f"{count} студ.")
     else:
-        k1.metric("Всього студентів", len(df_st) if not df_st.empty else 231)
+        k1.metric("Всього студентів", len(df_st) if not df_st.empty else 236)
     
     # Файли
     k2.metric("Завантажено матеріалів", len(df_files) if not df_files.empty else 0)
