@@ -9,33 +9,52 @@ import altair as alt
 import re
 import os
 
-# 1. ОБ’ЄДНАНІ НАЛАШТУВАННЯ ТАБЛИЦЬ
+# --- НАЛАШТУВАННЯ ТАБЛИЦЬ (EXCEL) ---
+
 TABLES = {
     "students": "tables/students.xlsx",
     "users": "tables/users.xlsx",
     "grades": "tables/grades.xlsx",
     "attendance": "tables/attendance.xlsx",
     "schedule": "tables/schedule.xlsx",
-    "news": "tables/news.xlsx"
+    "dormitory": "tables/dormitory.xlsx",
+    "scholarship": "tables/scholarship.xlsx",
+    "logs": "tables/system_logs.xlsx",
+    "news": "tables/news.xlsx",
+    "academic_certificates": "tables/academic_certificates.xlsx",
+    "documents": "tables/documents.xlsx",
+    "exam_sheets": "tables/exam_sheets.xlsx",
+    "individual_statements": "tables/individual_statements.xlsx",
+    "student_contracts": "tables/student_contracts.xlsx",
+    "student_education_info": "tables/student_education_info.xlsx",
+    "student_prev_education": "tables/student_prev_education.xlsx"
 }
 
-# Створюємо директорію, якщо її немає, щоб уникнути FileNotFoundError
-if not os.path.exists('tables'):
-    os.makedirs('tables')
-
 def load_data(table_key):
+    """Безпечне завантаження даних з Excel з урахуванням регістру латиниці"""
     path = TABLES.get(table_key)
+    
+    # Створюємо директорію, якщо вона раптом відсутня в оточенні
+    if not os.path.exists('tables'):
+        os.makedirs('tables')
+        
     if path and os.path.exists(path):
         try:
-            return pd.read_excel(path)
-        except:
+            # engine='openpyxl' обов'язковий для роботи на Streamlit Cloud
+            return pd.read_excel(path, engine='openpyxl')
+        except Exception:
             return pd.DataFrame()
     return pd.DataFrame()
 
 def save_data(df, table_key):
+    """Збереження даних (тимчасове для сесії Streamlit Cloud)"""
     path = TABLES.get(table_key)
     if path:
-        df.to_excel(path, index=False)
+        try:
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            df.to_excel(path, index=False, engine='xlsxwriter')
+        except Exception:
+            pass
 
 # 2. ОЧИЩЕНІ БАЗОВІ ФУНКЦІЇ (Залишити тільки по одному екземпляру!)
 def create_connection():
@@ -425,7 +444,7 @@ def main_panel():
         count = len(df_st[df_st['group_name'] == my_group]) if not df_st.empty else 0
         k1.metric("Моя група", f"{count} студ.")
     else:
-        k1.metric("Всього студентів", len(df_st) if not df_st.empty else 236)
+        k1.metric("Всього студентів", len(df_st) if not df_st.empty else 0)
     
     # Файли
     k2.metric("Завантажено матеріалів", len(df_files) if not df_files.empty else 0)
