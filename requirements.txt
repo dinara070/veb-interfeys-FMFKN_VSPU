@@ -1,7 +1,6 @@
 streamlit
 streamlit-cookies-controller
 pandas
-altair
-xlsxwriter
 openpyxl
-pyarrow
+xlsxwriter
+altair
