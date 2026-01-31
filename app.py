@@ -60,13 +60,18 @@ def save_data(df, table_key):
         except Exception as e:
             st.error(f"Помилка збереження файлу {path}: {e}")
 
-# 2. ОЧИЩЕНІ БАЗОВІ ФУНКЦІЇ
+# --- 2. БАЗОВІ ФУНКЦІЇ БЕЗПЕКИ ТА СИСТЕМИ ---
+
 def make_hashes(password):
-    """Хешування пароля з додаванням секретної солі"""
+    """Хешування пароля з додаванням секретної солі (БЕЗПЕЧНО)"""
     return hashlib.sha256(str.encode(password + SALT)).hexdigest()
 
+def check_hashes(password, hashed_text):
+    """Перевірка пароля шляхом порівняння хешів із сіллю"""
+    return make_hashes(password) == hashed_text
+
 def create_connection():
-    """Створення підключення до SQLite"""
+    """Створення підключення до SQLite бази даних"""
     return sqlite3.connect('university_v22.db', check_same_thread=False)
 
 def safe_rerun():
@@ -74,41 +79,26 @@ def safe_rerun():
     try:
         st.rerun()
     except AttributeError:
-        # Для старих версій бібліотеки на хостингу
         st.experimental_rerun()
 
 # --- КОНФІГУРАЦІЯ СТОРІНКИ ---
 st.set_page_config(page_title="ФМФКН - Деканат", layout="wide", page_icon="🎓")
 
-# --- БАЗОВІ ФУНКЦІЇ БЕЗПЕКИ ---
-def create_connection():
-    return sqlite3.connect('university_v22.db', check_same_thread=False)
-
-def make_hashes(password):
-    return hashlib.sha256(str.encode(password)).hexdigest()
-
-def safe_rerun():
-    """Безпечне перезавантаження сторінки для різних версій Streamlit"""
-    try:
-        st.rerun()
-    except AttributeError:
-        # Для старих версій бібліотеки на хостингу
-        st.experimental_rerun()
-
 def perform_login(user):
-    """Обробка успішного входу в систему з безпечним перезавантаженням"""
+    """Обробка успішного входу в систему з ініціалізацією кукі та сесії"""
+    controller = CookieController()
+    
     st.session_state['logged_in'] = True
     st.session_state['username'] = user[0]
     st.session_state['role'] = user[2]
     st.session_state['full_name'] = user[3]
     st.session_state['group'] = user[4] if len(user) > 4 else "Staff"
 
-    # Зберігаємо логін у кукі через контролер
     controller.set('remember_user', user[0])
 
     log_action(user[3], "Login", "Вхід у систему")
     st.success(f"Вітаємо, {user[3]}!")
-    safe_rerun() # Використовуємо безпечний метод замість st.rerun()
+    safe_rerun()
 
 # --- ЛОГІКА ТЕМИ ---
 if 'theme' not in st.session_state:
