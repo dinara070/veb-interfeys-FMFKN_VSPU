@@ -1,3 +1,4 @@
+#1
 import streamlit as st
 from streamlit_cookies_controller import CookieController
 import sqlite3
@@ -7,98 +8,44 @@ from datetime import datetime
 import io
 import altair as alt
 import re
-import os
 
-# --- 1. НАЛАШТУВАННЯ ТА БЕЗПЕКА ---
-SALT = "fmfkn_secret_key_2026" # Сіль для захисту хешів
-
-TABLES = {
-    "students": "tables/students.xlsx",
-    "users": "tables/users.xlsx",
-    "grades": "tables/grades.xlsx",
-    "attendance": "tables/attendance.xlsx",
-    "schedule": "tables/schedule.xlsx",
-    "dormitory": "tables/dormitory.xlsx",
-    "scholarship": "tables/scholarship.xlsx",
-    "logs": "tables/system_logs.xlsx",
-    "news": "tables/news.xlsx",
-    "academic_certificates": "tables/academic_certificates.xlsx",
-    "documents": "tables/documents.xlsx",
-    "exam_sheets": "tables/exam_sheets.xlsx",
-    "individual_statements": "tables/individual_statements.xlsx",
-    "student_contracts": "tables/student_contracts.xlsx",
-    "student_education_info": "tables/student_education_info.xlsx",
-    "student_prev_education": "tables/student_prev_education.xlsx"
-}
-
-def load_data(table_key):
-    """Безпечне завантаження даних з Excel з використанням двигуна openpyxl"""
-    path = TABLES.get(table_key)
-    
-    # Перевірка та створення папки tables, якщо її немає на хостингу
-    if not os.path.exists('tables'):
-        os.makedirs('tables')
-        
-    if path and os.path.exists(path):
-        try:
-            # engine='openpyxl' критично важливий для роботи на Streamlit Cloud
-            return pd.read_excel(path, engine='openpyxl')
-        except Exception as e:
-            # У разі помилки повертаємо порожню таблицю, щоб не зупиняти додаток
-            return pd.DataFrame()
-    return pd.DataFrame()
-
-def save_data(df, table_key):
-    """Збереження даних у Excel з використанням двигуна xlsxwriter"""
-    path = TABLES.get(table_key)
-    if path:
-        try:
-            # Створення шляху до файлу, якщо директорія відсутня
-            os.makedirs(os.path.dirname(path), exist_ok=True)
-            # engine='xlsxwriter' забезпечує стабільний запис
-            df.to_excel(path, index=False, engine='xlsxwriter')
-        except Exception as e:
-            st.error(f"Помилка збереження файлу {path}: {e}")
-
-# --- 2. БАЗОВІ ФУНКЦІЇ БЕЗПЕКИ ТА СИСТЕМИ ---
-
-def make_hashes(password):
-    """Хешування пароля з додаванням секретної солі (БЕЗПЕЧНО)"""
-    return hashlib.sha256(str.encode(password + SALT)).hexdigest()
-
-def check_hashes(password, hashed_text):
-    """Перевірка пароля шляхом порівняння хешів із сіллю"""
-    return make_hashes(password) == hashed_text
-
-def create_connection():
-    """Створення підключення до SQLite бази даних"""
-    return sqlite3.connect('university_v22.db', check_same_thread=False)
-
-def safe_rerun():
-    """Безпечне перезавантаження сторінки для різних версій Streamlit"""
-    try:
-        st.rerun()
-    except AttributeError:
-        st.experimental_rerun()
+# Ініціалізація контролера кукі (для збереження логіна на роки)
+controller = CookieController()
 
 # --- КОНФІГУРАЦІЯ СТОРІНКИ ---
 st.set_page_config(page_title="ФМФКН - Деканат", layout="wide", page_icon="🎓")
 
+# --- БАЗОВІ ФУНКЦІЇ БД ТА БЕЗПЕКИ ---
+def create_connection():
+    # Файл БД зберігається локально. Дані в ньому зберігаються вічно, поки файл існує.
+    return sqlite3.connect('university_v22.db', check_same_thread=False)
+
+def make_hashes(password):
+    return hashlib.sha256(str.encode(password)).hexdigest()
+
+def check_hashes(password, hashed_text):
+    return make_hashes(password) == hashed_text
+
 def perform_login(user):
-    """Обробка успішного входу в систему з ініціалізацією кукі та сесії"""
-    controller = CookieController()
-    
+    """Авторизація та збереження логіна в браузері користувача"""
     st.session_state['logged_in'] = True
     st.session_state['username'] = user[0]
     st.session_state['role'] = user[2]
     st.session_state['full_name'] = user[3]
-    st.session_state['group'] = user[4] if len(user) > 4 else "Staff"
+    st.session_state['group'] = user[4]
 
+    # Зберігаємо username в кукі. Навіть через рік браузер його пам'ятатиме.
     controller.set('remember_user', user[0])
 
-    log_action(user[3], "Login", "Вхід у систему")
+    # Логування входу
+    ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    conn = create_connection()
+    conn.execute("INSERT INTO system_logs (user, action, details, timestamp) VALUES (?,?,?,?)",
+                 (user[3], "Login", "Вхід у систему", ts))
+    conn.commit()
+
     st.success(f"Вітаємо, {user[3]}!")
-    safe_rerun()
+    st.rerun()
 
 # --- ЛОГІКА ТЕМИ ---
 if 'theme' not in st.session_state:
@@ -276,85 +223,71 @@ def create_connection():
     return sqlite3.connect('university_v22.db', check_same_thread=False)
 
 def init_db():
-    """Створення ВСІХ таблиць системи та початкове заповнення"""
     conn = create_connection()
     c = conn.cursor()
-    
-    # 1. Користувачі та Студенти
-    c.execute('''CREATE TABLE IF NOT EXISTS users 
+
+    # 1. Основні таблиці
+    c.execute('''CREATE TABLE IF NOT EXISTS users
                  (username TEXT PRIMARY KEY, password TEXT, role TEXT, full_name TEXT, group_link TEXT)''')
-    
-    c.execute('''CREATE TABLE IF NOT EXISTS students 
+    c.execute('''CREATE TABLE IF NOT EXISTS students
                  (id INTEGER PRIMARY KEY AUTOINCREMENT, full_name TEXT, group_name TEXT)''')
 
-    # 2. Навчальний процес (Розклад, Оцінки, Відвідуваність)
-    c.execute('''CREATE TABLE IF NOT EXISTS schedule 
+    # 2. Навчальний процес
+    c.execute('''CREATE TABLE IF NOT EXISTS schedule
                  (id INTEGER PRIMARY KEY AUTOINCREMENT, group_name TEXT, day TEXT, time TEXT, subject TEXT, teacher TEXT)''')
-    
-    c.execute('''CREATE TABLE IF NOT EXISTS grades 
+    c.execute('''CREATE TABLE IF NOT EXISTS grades
                  (id INTEGER PRIMARY KEY AUTOINCREMENT, student_name TEXT, group_name TEXT, subject TEXT, type_of_work TEXT, grade INTEGER, date TEXT)''')
-    
-    c.execute('''CREATE TABLE IF NOT EXISTS attendance 
+    c.execute('''CREATE TABLE IF NOT EXISTS attendance
                  (id INTEGER PRIMARY KEY AUTOINCREMENT, student_name TEXT, group_name TEXT, subject TEXT, date_column TEXT, status TEXT)''')
 
-    # 3. Деканат: Гуртожиток та Стипендії
-    c.execute('''CREATE TABLE IF NOT EXISTS dormitory 
+    # 3. Деканат та Соціальні модулі
+    c.execute('''CREATE TABLE IF NOT EXISTS dormitory
                  (id INTEGER PRIMARY KEY AUTOINCREMENT, student_name TEXT, room_number TEXT, payment_status TEXT, comments TEXT)''')
-    
-    c.execute('''CREATE TABLE IF NOT EXISTS scholarship 
+    c.execute('''CREATE TABLE IF NOT EXISTS scholarship
                  (id INTEGER PRIMARY KEY AUTOINCREMENT, student_name TEXT, type TEXT, amount INTEGER, status TEXT, date_assigned TEXT)''')
-
-    # 4. Фінанси: Контракти
-    c.execute('''CREATE TABLE IF NOT EXISTS student_contracts 
+    c.execute('''CREATE TABLE IF NOT EXISTS student_contracts
                  (id INTEGER PRIMARY KEY AUTOINCREMENT, student_name TEXT, contract_number TEXT, date_signed TEXT, end_date TEXT, total_amount REAL, paid_amount REAL, payment_status TEXT, notes TEXT)''')
 
-    # 5. Документообіг та Сесія
-    c.execute('''CREATE TABLE IF NOT EXISTS documents 
+    # 4. Документообіг та Сесія
+    c.execute('''CREATE TABLE IF NOT EXISTS documents
                  (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT, student_name TEXT, status TEXT, date TEXT)''')
-    
-    c.execute('''CREATE TABLE IF NOT EXISTS exam_sheets 
+    c.execute('''CREATE TABLE IF NOT EXISTS exam_sheets
                  (id INTEGER PRIMARY KEY AUTOINCREMENT, sheet_number TEXT, group_name TEXT, subject TEXT, control_type TEXT, exam_date TEXT, examiner TEXT, status TEXT)''')
-    
-    c.execute('''CREATE TABLE IF NOT EXISTS individual_statements 
+    c.execute('''CREATE TABLE IF NOT EXISTS individual_statements
                  (id INTEGER PRIMARY KEY AUTOINCREMENT, student_name TEXT, subject TEXT, statement_type TEXT, reason TEXT, date_issued TEXT, status TEXT, created_by TEXT)''')
 
-    # 6. Спеціалізована інформація (Анкети)
-    c.execute('''CREATE TABLE IF NOT EXISTS student_education_info 
+    # 5. Спеціалізовані дані (Анкети)
+    c.execute('''CREATE TABLE IF NOT EXISTS student_education_info
                  (student_name TEXT PRIMARY KEY, status TEXT, study_form TEXT, course INTEGER, is_contract TEXT, faculty TEXT, specialty TEXT, edu_program TEXT, referral_type TEXT, enterprise TEXT, enroll_protocol_num TEXT, enroll_order_num TEXT, enroll_condition TEXT, enroll_protocol_date TEXT, enroll_order_date TEXT, enroll_date TEXT, grad_order_num TEXT, grad_order_date TEXT, grad_date TEXT, student_id_card TEXT, gradebook_id TEXT, library_card TEXT, curator TEXT, last_modified TEXT)''')
-    
-    c.execute('''CREATE TABLE IF NOT EXISTS student_prev_education 
+    c.execute('''CREATE TABLE IF NOT EXISTS student_prev_education
                  (student_name TEXT PRIMARY KEY, institution_name TEXT, institution_type TEXT, diploma_type TEXT, diploma_series TEXT, diploma_number TEXT, diploma_grades_summary TEXT, foreign_languages TEXT, last_modified TEXT)''')
-    
-    c.execute('''CREATE TABLE IF NOT EXISTS academic_certificates 
+    c.execute('''CREATE TABLE IF NOT EXISTS academic_certificates
                  (id INTEGER PRIMARY KEY AUTOINCREMENT, student_name TEXT, cert_number TEXT, issue_date TEXT, source_institution TEXT, notes TEXT, added_by TEXT, added_date TEXT)''')
 
-    # 7. Системні таблиці (Логи, Файли, Новини)
-    c.execute('''CREATE TABLE IF NOT EXISTS news 
+    # 6. Системні таблиці
+    c.execute('''CREATE TABLE IF NOT EXISTS news
                  (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT, message TEXT, author TEXT, date TEXT)''')
-    
-    c.execute('''CREATE TABLE IF NOT EXISTS system_logs 
+    c.execute('''CREATE TABLE IF NOT EXISTS system_logs
                  (id INTEGER PRIMARY KEY AUTOINCREMENT, user TEXT, action TEXT, details TEXT, timestamp TEXT)''')
-    
-    c.execute('''CREATE TABLE IF NOT EXISTS file_storage 
+    c.execute('''CREATE TABLE IF NOT EXISTS file_storage
                  (id INTEGER PRIMARY KEY AUTOINCREMENT, filename TEXT, file_content BLOB, upload_date TEXT, uploader TEXT, subject TEXT, description TEXT)''')
 
     conn.commit()
 
-    # --- ПЕРВИННЕ ЗАПОВНЕННЯ ---
-    c.execute('SELECT count(*) FROM users')
+    # --- АВТОМАТИЧНЕ ЗАПОВНЕННЯ (якщо база порожня) ---
+    c.execute('SELECT count(*) FROM students')
     if c.fetchone()[0] == 0:
-        # Створення адміна (обов'язково!)
-        admin_pass = make_hashes("admin123")
-        c.execute('INSERT INTO users (username, password, role, full_name, group_link) VALUES (?,?,?,?,?)', 
-                  ('admin', admin_pass, 'admin', 'Головний Адміністратор', ''))
-        
-        # Імпорт студентів з Excel
-        df_st = load_data("students")
-        if not df_st.empty:
-            df_st.to_sql('students', conn, if_exists='append', index=False)
-        
+        # Створюємо адміна
+        c.execute('INSERT OR IGNORE INTO users VALUES (?,?,?,?,?)',
+                  ('admin', make_hashes('admin'), 'admin', 'Головний Адміністратор', ''))
+
+        # Додаємо студентів з вашого словника GROUPS_DATA
+        for group, names in GROUPS_DATA.items():
+            for name in names:
+                clean_name = name.lstrip("0123456789. ")
+                c.execute('INSERT INTO students (full_name, group_name) VALUES (?,?)', (clean_name, group))
         conn.commit()
-        
+
     return conn
 
 def log_action(user, action, details):
@@ -386,173 +319,152 @@ def perform_login(user):
 # --- СТОРІНКИ ---
 
 def login_register_page():
-    """Сторінка входу з гібридною перевіркою (Excel + SQL)"""
-    controller = CookieController() # Локальна ініціалізація
+    """Оновлена сторінка входу та реєстрації з тривалим збереженням даних"""
     col1, col2, col3 = st.columns([1, 2, 1])
 
     with col2:
         st.markdown("<h2 style='text-align: center;'>🎓 Project Deanery .net</h2>", unsafe_allow_html=True)
+
+        # Вибір режиму: Вхід або Реєстрація через вкладки
         mode = st.tabs(["🔐 Увійти", "📝 Реєстрація"])
 
+        conn = create_connection()
+        c = conn.cursor()
+
+        # --- ВКЛАДКА ВХОДУ ---
         with mode[0]:
+            # Читаємо збережений логін з кукі браузера (ключ remember_user)
             saved_username = controller.get('remember_user')
-            username = st.text_input("Username:", value=saved_username if saved_username else "", key="login_user")
+
+            username = st.text_input("Ім'я користувача (Username):", value=saved_username if saved_username else "", key="login_user")
             password = st.text_input("Пароль:", type='password', key="login_pass")
 
+            # Блок Капчі (цифровий код підтвердження)
+            st.divider()
             captcha_val = "56388"
+            st.markdown(f"**Код підтвердження:**")
             st.code(captcha_val, language=None)
-            user_captcha = st.text_input("Введіть код вище:", key="login_captcha")
+            user_captcha = st.text_input("Введіть код, який ви бачите вище:", key="login_captcha")
 
-            if st.button("Увійти", use_container_width=True):
+            if st.button("Увійти в систему", use_container_width=True):
                 if user_captcha != captcha_val:
-                    st.error("❌ Невірний код підтвердження.")
+                    st.error("❌ Невірний код підтвердження. Спробуйте ще раз.")
                 elif username and password:
                     hashed_input = make_hashes(password)
-                    
-                    # Спочатку шукаємо в Excel (основна база)
-                    df_users = load_data("users")
-                    user_found = None
-                    if not df_users.empty:
-                        match = df_users[(df_users['username'] == username) & (df_users['password'] == hashed_input)]
-                        if not match.empty:
-                            user_found = match.iloc[0].values.tolist()
-
-                    # Якщо немає в Excel, шукаємо в SQLite (нові реєстрації)
-                    if not user_found:
-                        conn = create_connection()
-                        c = conn.cursor()
-                        c.execute('SELECT * FROM users WHERE username=? AND password=?', (username, hashed_input))
-                        user_found = c.fetchone()
-
-                    if user_found:
-                        perform_login(user_found)
+                    c.execute('SELECT * FROM users WHERE username=? AND password=?', (username, hashed_input))
+                    user = c.fetchone()
+                    if user:
+                        perform_login(user)
                     else:
-                        st.error("❌ Невірний логін або пароль.")
+                        st.error("❌ Користувача не знайдено або пароль невірний. Перевірте дані.")
+                else:
+                    st.warning("⚠️ Будь ласка, заповніть усі поля для входу.")
 
+        # --- ВКЛАДКА РЕЄСТРАЦІЇ ---
         with mode[1]:
-            st.markdown("### Реєстрація")
-            new_user = st.text_input("Логін:", key="reg_user")
-            new_pass = st.text_input("Пароль:", type='password', key="reg_pass")
-            full_name = st.text_input("ПІБ:", key="reg_name")
-            role_choice = st.selectbox("Посада:", ROLES_LIST)
+            st.markdown("### Первинна реєстрація")
+            st.info("Ви реєструєтесь один раз. Після цього ваш акаунт буде зберігатися в базі постійно.")
 
-            if st.button("Створити акаунт"):
+            new_user = st.text_input("Придумайте унікальний логін:", key="reg_user_new")
+            new_pass = st.text_input("Придумайте надійний пароль:", type='password', key="reg_pass_new")
+            full_name = st.text_input("Ваше повне ПІБ (напр. Іванов Іван Іванович):", key="reg_full_name")
+            role_choice = st.selectbox("Оберіть вашу посаду:", ROLES_LIST, key="reg_role_select")
+
+            if st.button("Створити обліковий запис", use_container_width=True):
                 if new_user and new_pass and full_name:
                     try:
-                        conn = create_connection()
                         hashed_pw = make_hashes(new_pass)
-                        conn.execute('INSERT INTO users VALUES (?,?,?,?,?)', 
-                                     (new_user, hashed_pw, role_choice, full_name, ""))
+                        # Записуємо в базу даних. Ці дані залишаться в файлі .db
+                        c.execute('INSERT INTO users (username, password, role, full_name, group_link) VALUES (?,?,?,?,?)',
+                                  (new_user, hashed_pw, role_choice, full_name, "Staff"))
                         conn.commit()
-                        st.success("🎉 Реєстрація успішна! Увійдіть на вкладці 'Увійти'.")
+
+                        # Зберігаємо логін в кукі, щоб поле 'Username' у вкладці входу заповнилося автоматично
+                        controller.set('remember_user', new_user)
+
+                        st.success("🎉 Реєстрація успішна! Ваш акаунт створено та внесено в базу.")
+                        st.info("Тепер просто перейдіть на вкладку **'🔐 Увійти'** — ваш логін вже підставлено.")
+                        st.balloons()
                     except sqlite3.IntegrityError:
-                        st.error("⚠️ Логін зайнятий.")
+                        st.error("⚠️ Цей логін вже зайнятий. Будь ласка, оберіть інший.")
+                else:
+                    st.warning("⚠️ Для реєстрації необхідно заповнити всі доступні поля.")
 
 def main_panel():
-    """Головна панель: поєднання Excel-даних та інтерактивної аналітики"""
     st.title("🏠 Головна панель")
-    st.markdown(f"### Вітаємо, {st.session_state.get('full_name', 'Користувач')}!")
-    
-    # 1. Завантаження даних з Excel
-    df_st = load_data("students")
-    df_grades = load_data("grades")
-    df_att = load_data("attendance")
-    df_news = load_data("news")
-    df_files = load_data("file_storage")
+    st.markdown(f"### Вітаємо, {st.session_state['full_name']}!")
+    conn = create_connection()
 
-    # 2. Блок метрик (KPI)
     st.divider()
     st.subheader("📊 Аналітика та Статистика")
-    k1, k2, k3 = st.columns(3)
-    
-    # Кількість студентів
-    if st.session_state.get('role') in ['student', 'starosta']:
-        my_group = st.session_state.get('group', '')
-        count = len(df_st[df_st['group_name'] == my_group]) if not df_st.empty else 0
-        k1.metric("Моя група", f"{count} студ.")
-    else:
-        k1.metric("Всього студентів", len(df_st) if not df_st.empty else 0)
-    
-    # Файли
-    k2.metric("Завантажено матеріалів", len(df_files) if not df_files.empty else 0)
-    
-    # Середній бал
-    if not df_grades.empty and 'grade' in df_grades.columns:
-        if st.session_state.get('role') in ['student', 'starosta']:
-            val = df_grades[df_grades['student_name'] == st.session_state['full_name']]['grade'].mean()
-        else:
-            val = df_grades['grade'].mean()
-        k3.metric("Середній бал", round(val, 2) if pd.notnull(val) else 0)
-    else:
-        k3.metric("Середній бал", 0)
+    kpi1, kpi2, kpi3 = st.columns(3)
 
-    # 3. Графіки (Візуалізація)
+    if st.session_state['role'] in ['student', 'starosta']:
+        my_group = st.session_state['group']
+        group_count = pd.read_sql_query(f"SELECT count(*) FROM students WHERE group_name='{my_group}'", conn).iloc[0,0]
+        kpi1.metric("Моя група", f"{group_count} студ.")
+    else:
+        total_students = pd.read_sql_query("SELECT count(*) FROM students", conn).iloc[0,0]
+        kpi1.metric("Всього студентів", total_students)
+
+    file_count = pd.read_sql_query("SELECT count(*) FROM file_storage", conn).iloc[0,0]
+    kpi2.metric("Завантажено матеріалів", file_count)
+
+    if st.session_state['role'] in ['student', 'starosta']:
+        avg_q = f"SELECT avg(grade) FROM grades WHERE student_name='{st.session_state['full_name']}'"
+    else:
+        avg_q = "SELECT avg(grade) FROM grades"
+    avg_val = pd.read_sql_query(avg_q, conn).iloc[0,0]
+    avg_val = round(avg_val, 1) if avg_val else 0
+    kpi3.metric("Середній бал", avg_val)
+
     col_chart1, col_chart2 = st.columns(2)
-    
     with col_chart1:
         st.markdown("**📈 Успішність (Середній бал)**")
-        if not df_grades.empty:
-            if st.session_state.get('role') in ['student', 'starosta']:
-                chart_data = df_grades[df_grades['student_name'] == st.session_state['full_name']]
-            else:
-                chart_data = df_grades
-            
-            if not chart_data.empty:
-                avg_chart = chart_data.groupby('subject')['grade'].mean().reset_index()
-                st.bar_chart(avg_chart.set_index('subject'))
-            else: st.info("Немає даних для графіка.")
-        else: st.info("Журнал оцінок порожній.")
+        if st.session_state['role'] in ['student', 'starosta']:
+            query_chart = f"SELECT subject, avg(grade) as avg_grade FROM grades WHERE student_name='{st.session_state['full_name']}' GROUP BY subject"
+        else:
+            query_chart = "SELECT subject, avg(grade) as avg_grade FROM grades GROUP BY subject"
+        df_chart = pd.read_sql_query(query_chart, conn)
+        if not df_chart.empty: st.bar_chart(df_chart.set_index('subject'))
+        else: st.info("Наразі дані не завантажені.")
 
     with col_chart2:
-        st.markdown("**📉 Відвідуваність (Загальна)**")
-        if not df_att.empty and 'status' in df_att.columns:
-            absent = len(df_att[df_att['status'] == 'н'])
-            present = len(df_att) - absent
-            pie_data = pd.DataFrame({
-                'Статус': ['Присутній', 'Відсутній (н)'],
-                'Кількість': [present, absent]
-            })
-            pie = alt.Chart(pie_data).mark_arc(innerRadius=50).encode(
-                theta="Кількість",
-                color="Статус",
-                tooltip=["Статус", "Кількість"]
-            )
+        st.markdown("**📉 Відвідуваність**")
+        q_att = f"SELECT status FROM attendance WHERE student_name='{st.session_state['full_name']}'" if st.session_state['role'] in ['student', 'starosta'] else "SELECT status FROM attendance"
+        df_att = pd.read_sql_query(q_att, conn)
+        if not df_att.empty:
+            absent_count = df_att[df_att['status'] != ''].shape[0]
+            present_count = df_att[df_att['status'] == ''].shape[0]
+            att_data = pd.DataFrame({'Статус': ['Присутній', 'Відсутній/Інше'], 'Кількість': [present_count, absent_count]})
+            base = alt.Chart(att_data).encode(theta=alt.Theta("Кількість", stack=True))
+            pie = base.mark_arc(outerRadius=120).encode(color=alt.Color("Статус"), order=alt.Order("Кількість", sort="descending"), tooltip=["Статус", "Кількість"])
             st.altair_chart(pie, use_container_width=True)
-        else: st.info("Дані про відвідуваність відсутні.")
+        else: st.info("Наразі дані не завантажені.")
 
-    # 4. Блок новин та оголошень
     st.divider()
     st.subheader("📢 Оголошення та Новини")
-    
-    # Дозволяємо викладачам додавати новини (збереження в Excel)
-    if st.session_state.get('role') in TEACHER_LEVEL:
+    if st.session_state['role'] in TEACHER_LEVEL:
         with st.expander("📝 Додати нове оголошення"):
-            with st.form("news_form_excel"):
-                n_title = st.text_input("Заголовок")
-                n_msg = st.text_area("Текст")
+            with st.form("news_form"):
+                n_title = st.text_input("Заголовок новини")
+                n_msg = st.text_area("Текст оголошення")
                 if st.form_submit_button("Опублікувати"):
                     if n_title and n_msg:
-                        new_post = pd.DataFrame([{
-                            "title": n_title,
-                            "message": n_msg,
-                            "author": st.session_state['full_name'],
-                            "date": datetime.now().strftime("%Y-%m-%d %H:%M")
-                        }])
-                        df_news_updated = pd.concat([df_news, new_post], ignore_index=True)
-                        save_data(df_news_updated, "news")
-                        st.success("Новину додано в Excel!")
+                        c = conn.cursor()
+                        date_pub = datetime.now().strftime("%Y-%m-%d %H:%M")
+                        c.execute("INSERT INTO news (title, message, author, date) VALUES (?,?,?,?)", (n_title, n_msg, st.session_state['full_name'], date_pub))
+                        conn.commit()
+                        st.success("Новину опубліковано!")
                         st.rerun()
-
-    # Відображення стрічки новин
-    if not df_news.empty:
-        # Показуємо останні 5 новин (нові зверху)
-        for _, row in df_news.iloc[::-1].head(5).iterrows():
+    news_df = pd.read_sql_query("SELECT title, message, author, date FROM news ORDER BY id DESC", conn)
+    if not news_df.empty:
+        for i, row in news_df.iterrows():
             with st.container(border=True):
                 st.markdown(f"### {row['title']}")
                 st.write(row['message'])
                 st.caption(f"🗓️ {row['date']} | ✍️ {row['author']}")
-    else:
-        st.info("Наразі немає актуальних оголошень.")
+    else: st.info("Наразі немає актуальних оголошень.")
 
 def students_groups_view():
     st.title("👥 Студенти та Групи")
@@ -1696,37 +1608,29 @@ def system_settings_view():
         st.download_button("⬇️ Завантажити лог (CSV)", convert_df_to_csv(logs_df), "system_logs.csv", "text/csv")
 
 
-# --- 3. ЛОГІКА ТА МЕНЮ ---
-st.set_page_config(page_title="ФМФКН - Деканат", layout="wide", page_icon="🎓")
-
 def main():
-    # Ініціалізація бази даних при кожному запуску (створення таблиць, якщо їх немає)
     init_db()
 
     if 'logged_in' not in st.session_state:
         st.session_state['logged_in'] = False
 
-    # Логіка відображення: вхід або робоча панель
+    # 3. ЛОГІКА ВІДОБРАЖЕННЯ: якщо не зайшли - показуємо вхід, якщо зайшли - робочу панель
     if not st.session_state['logged_in']:
         login_register_page()
     else:
         # --- БОКОВА ПАНЕЛЬ (SIDEBAR) ---
         st.sidebar.title(f"👤 {st.session_state.get('full_name', 'Користувач')}")
 
-        # Визначення ролі та відображення статусу
-        current_role = st.session_state.get('role', 'student').lower()
+        current_role = st.session_state.get('role', '').lower()
         if current_role == 'student':
              st.sidebar.markdown("### 🛡️ СТУДЕНТ (READ ONLY)")
         elif current_role == 'tech_admin':
              st.sidebar.markdown("### ⚙️ ТЕХНІЧНИЙ АДМІНІСТРАТОР")
         elif current_role == 'teacher':
              st.sidebar.markdown("### 👨‍🏫 ВИКЛАДАЧ (ACADEMIC)")
-        elif current_role in ['admin', 'dean']:
-             st.sidebar.markdown(f"### 🎓 {current_role.upper()}")
         else:
              st.sidebar.caption(f"Роль: {current_role.upper()}")
 
-        # Кнопка перемикання теми
         if st.sidebar.button("Перемкнути тему 🌓"):
             toggle_theme()
             st.rerun()
@@ -1734,43 +1638,34 @@ def main():
         st.sidebar.divider()
 
         # --- НАЛАШТУВАННЯ МЕНЮ НАВІГАЦІЇ ---
-        # Базові пункти, доступні всім (включаючи студентів)
         menu_options = {
             "Головна панель": main_panel,
+            "Студенти та Групи": students_groups_view,
+            "Викладачі та Кафедри": teachers_view,
             "Розклад занять": schedule_view,
             "Електронний журнал": gradebook_view,
             "Журнал відвідуваності": attendance_view,
+            "Звіти та Пошук": reports_view,
             "Документообіг": documents_view,
             "Файловий репозиторій": file_repository_view
         }
 
-        # Розширений доступ для Деканату та Адмінів (DEAN_LEVEL)
-        if current_role in ['admin', 'dean']:
-            menu_options.update({
-                "Студенти та Групи": students_groups_view,
-                "Викладачі та Кафедри": teachers_view,
-                "Звіти та Пошук": reports_view,
-                "Модулі Деканату": deanery_modules_view,
-                "Сесія та Рух": session_module_view
-            })
+        if current_role in DEAN_LEVEL:
+            menu_options["Модулі Деканату"] = deanery_modules_view
+            menu_options["Сесія та Рух"] = session_module_view
 
-        # Доступ до системних налаштувань тільки для ролі 'admin'
         if current_role == 'admin':
             menu_options["Системні налаштування"] = system_settings_view
 
-        # Відображення радіо-кнопок навігації
         selection = st.sidebar.radio("Навігація", list(menu_options.keys()))
 
-        # Виклик обраної функції сторінки
         menu_options[selection]()
 
         st.sidebar.divider()
 
-        # Кнопка виходу
         if st.sidebar.button("Вийти 🚪"):
             st.session_state['logged_in'] = False
             st.rerun()
 
-# Точка входу в програму
 if __name__ == '__main__':
     main()
