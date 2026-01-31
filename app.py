@@ -9,40 +9,41 @@ import altair as alt
 import re
 import os
 
-# --- НАЛАШТУВАННЯ ТАБЛИЦЬ (EXCEL) ---
-# На основі ваших скриншотів GitHub
+# 1. ОБ’ЄДНАНІ НАЛАШТУВАННЯ ТАБЛИЦЬ
 TABLES = {
-    "students": "tables/студенти.xlsx",
-    "users": "tables/користувачі.xlsx",
-    "grades": "tables/оцінки.xlsx",
-    "attendance": "tables/відвідуваність.xlsx",
-    "schedule": "tables/розклад.xlsx",
-    "dormitory": "tables/гуртожиток.xlsx",
-    "scholarship": "tables/стипендія.xlsx",
-    "logs": "tables/системні_логи.xlsx",
-    "news": "tables/новини.xlsx"
+    "students": "tables/students.xlsx",
+    "users": "tables/users.xlsx",
+    "grades": "tables/grades.xlsx",
+    "attendance": "tables/attendance.xlsx",
+    "schedule": "tables/schedule.xlsx",
+    "news": "tables/news.xlsx"
 }
 
+# Створюємо директорію, якщо її немає, щоб уникнути FileNotFoundError
+if not os.path.exists('tables'):
+    os.makedirs('tables')
+
 def load_data(table_key):
-    """Безпечне завантаження даних з Excel"""
     path = TABLES.get(table_key)
-    if not os.path.exists('tables'):
-        os.makedirs('tables')
-        
     if path and os.path.exists(path):
         try:
             return pd.read_excel(path)
-        except Exception:
+        except:
             return pd.DataFrame()
     return pd.DataFrame()
 
 def save_data(df, table_key):
-    """Збереження даних у Excel"""
     path = TABLES.get(table_key)
     if path:
-        if not os.path.exists('tables'):
-            os.makedirs('tables')
         df.to_excel(path, index=False)
+
+# 2. ОЧИЩЕНІ БАЗОВІ ФУНКЦІЇ (Залишити тільки по одному екземпляру!)
+def create_connection():
+    # Використовуємо check_same_thread=False для роботи в Streamlit
+    return sqlite3.connect('university_v22.db', check_same_thread=False)
+
+def make_hashes(password):
+    return hashlib.sha256(str.encode(password)).hexdigest()
 
 # --- КОНФІГУРАЦІЯ СТОРІНКИ ---
 st.set_page_config(page_title="ФМФКН - Деканат", layout="wide", page_icon="🎓")
