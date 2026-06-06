@@ -1,7 +1,7 @@
 import streamlit as st
 from streamlit_cookies_controller import CookieController
 
-# Імпорт конфігурації та модулів
+# Імпортуємо з наших нових файлів
 from config import DEAN_LEVEL
 from database.db_core import init_db
 from ui.theme import apply_theme, toggle_theme
@@ -18,40 +18,31 @@ from ui.deanery import deanery_modules_view, session_module_view
 from ui.settings import system_settings_view
 from analytics.reports import reports_view
 
-# --- КОНФІГУРАЦІЯ СТОРІНКИ ---
 st.set_page_config(page_title="ФМФКН - Деканат", layout="wide", page_icon="🎓")
 
 def main():
-    # 1. Ініціалізація бази даних
+    # 1. Ініціалізація БД (з файлу database/db_core.py)
     init_db()
     
-    # 2. Ініціалізація контролера та теми
-    controller = CookieController()
-    apply_theme()
-
-    # 3. Стан сесії
-    if 'logged_in' not in st.session_state:
-        st.session_state['logged_in'] = False
-        
+    # 2. Тема (функції з ui/theme.py)
     if 'theme' not in st.session_state:
         st.session_state.theme = 'light'
+    apply_theme()
 
-    # --- ЛОГІКА ВІДОБРАЖЕННЯ ---
+    # 3. Авторизація
+    if 'logged_in' not in st.session_state:
+        st.session_state['logged_in'] = False
+
     if not st.session_state['logged_in']:
-        login_register_page() # Вона тепер використовує контролер всередині модуля
+        login_register_page()
     else:
         # --- БОКОВА ПАНЕЛЬ ---
         st.sidebar.title(f"👤 {st.session_state.get('full_name', 'Користувач')}")
         current_role = st.session_state.get('role', '').lower()
 
-        # Відображення ролі
-        st.sidebar.markdown(f"### 🏷️ {current_role.upper()}")
-
         if st.sidebar.button("Перемкнути тему 🌓"):
             toggle_theme()
             st.rerun()
-
-        st.sidebar.divider()
 
         # --- НАВІГАЦІЯ ---
         menu_options = {
@@ -74,14 +65,10 @@ def main():
             menu_options["Системні налаштування"] = system_settings_view
 
         selection = st.sidebar.radio("Навігація", list(menu_options.keys()))
-        
-        # Виклик функції обраної сторінки
-        menu_options[selection]()
+        menu_options[selection]() # Виклик функції сторінки
 
-        st.sidebar.divider()
         if st.sidebar.button("Вийти 🚪"):
             st.session_state['logged_in'] = False
-            st.session_state.clear()
             st.rerun()
 
 if __name__ == '__main__':
