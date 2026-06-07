@@ -2,3 +2,4 @@ streamlit
 streamlit-cookies-controller
 pandas
 xlsxwriter
+plotly
