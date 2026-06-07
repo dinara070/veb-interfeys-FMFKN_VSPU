@@ -9,7 +9,14 @@ from constants import TEACHER_LEVEL
 
 def main_panel():
     st.title("🏠 Головна панель")
-    st.markdown(f"### Вітаємо, {st.session_state['full_name']}!")
+    st.markdown(f"### Вітаємо, {st.session_state['full_name']}! 👋")
+    
+    # Доданий розширений текст
+    st.markdown("""
+    **Ласкаво просимо до вашого особистого освітнього простору!** Головна панель — це ваш персональний компас у навчальному процесі. Слідкуйте за своїм прогресом, 
+    аналізуйте успішність та відвідуваність, а також будьте в курсі всіх важливих новин.
+    """)
+    
     conn = create_connection()
 
     st.divider()
