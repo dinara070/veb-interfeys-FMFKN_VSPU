@@ -23,10 +23,11 @@ def file_repository_view():
                 f_desc = st.text_input("Опис")
                 if st.form_submit_button("Зберегти"):
                     if uploaded_file and f_desc:
+                        # ВИДАЛЕНО file_size
                         c.execute(
-                            "INSERT INTO file_storage (filename, file_content, upload_date, uploader, subject, description, file_size) VALUES (?,?,?,?,?,?,?)",
+                            "INSERT INTO file_storage (filename, file_content, upload_date, uploader, subject, description) VALUES (?,?,?,?,?,?)",
                             (uploaded_file.name, uploaded_file.read(), datetime.now().strftime("%Y-%m-%d %H:%M"), 
-                             st.session_state['full_name'], f_subject, f_desc, uploaded_file.size)
+                             st.session_state['full_name'], f_subject, f_desc)
                         )
                         conn.commit()
                         st.success("Файл успішно завантажено!")
@@ -34,7 +35,8 @@ def file_repository_view():
                     else:
                         st.warning("Будь ласка, заповніть всі поля.")
 
-    query = "SELECT id, filename, subject, description, upload_date, uploader, file_size FROM file_storage WHERE 1=1"
+    # ВИДАЛЕНО file_size із SELECT
+    query = "SELECT id, filename, subject, description, upload_date, uploader FROM file_storage WHERE 1=1"
     params = []
     
     if filter_subj != "Всі":
@@ -55,8 +57,7 @@ def file_repository_view():
                     c1, c2, c3, c4 = st.columns([3, 3, 2, 1])
                     c1.write(f"📄 **{row['filename']}**")
                     c2.write(f"📝 {row['description']}")
-                    size_kb = round(row['file_size'] / 1024, 1)
-                    c3.caption(f"👤 {row['uploader']} | 💾 {size_kb} KB")
+                    c3.caption(f"👤 {row['uploader']}") # ВИДАЛЕНО розмір
                     
                     data = c.execute("SELECT file_content FROM file_storage WHERE id=?", (row['id'],)).fetchone()[0]
                     c3.download_button("⬇️", data, row['filename'], key=f"d{row['id']}")
