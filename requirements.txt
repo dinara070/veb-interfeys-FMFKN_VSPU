@@ -3,3 +3,4 @@ streamlit-cookies-controller
 pandas
 xlsxwriter
 plotly
+sqlite3
